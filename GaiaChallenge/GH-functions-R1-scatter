@@ -1,0 +1,181 @@
+"""
+Function to return the Gauss Hermite value of order n
+for a given distribution of weights w.
+
+@author: Steven Gough-Kelly
+"""
+
+# Import Libraries
+import numpy as np 
+import matplotlib.pyplot as plt
+import scipy
+from scipy import stats
+import pandas as pd
+from datetime import datetime
+
+datafile = "GaiaChallenge/modelR1GaiaChallenge.csv"
+
+def Gauss_Hermite(w, n):
+    """
+    Return the Gauss Hermite function of order n, weights w
+    Gerhard MNRAS (1993) 265, 213-230
+    Equations 3.1 - 3.7
+    """
+    w = np.array(w)
+    p = scipy.special.hermite(n, monic=False) #hermite poly1d obj
+    norm = np.sqrt((2**(n+1))*np.pi*np.math.factorial(n)) # N_n Eqn 3.1
+
+    return (p(w)/norm) * np.exp( -0.5 * w * w )
+
+def GaussHermiteMoment(v, n):
+    v = v[np.isfinite(v)] # remove nans&inf
+    if len(v) <= 1: # Added SL speed+error catch
+        return np.nan
+    v_dash = (v - np.mean(v))/np.std(v) # center on 0, norm width to 1sig
+    hn = np.sum(Gauss_Hermite(v_dash, n))
+    return np.sqrt(4*np.pi) * hn / len(v)
+
+def LoadData():
+    start_time = datetime.now() 
+    df = pd.read_csv(datafile,header=None)
+    time_elapsed = datetime.now() - start_time 
+    print('Time elapsed (hh:mm:ss.ms) {}'.format(time_elapsed))
+    df.columns = ["x", "y", "z", "vx","vy","vz"]
+    return df
+
+def mat_rotate_z(x,y,z, angle):
+        angle = np.radians(angle)
+        mat = np.matrix([[np.cos(angle), -np.sin(angle), 0],
+                         [np.sin(angle), np.cos(angle) , 0],
+                         [0            , 0             , 1]])
+        return np.array(mat.dot([x, y, z]))
+
+
+def mat_rotate_y(x, y, z, angle):
+        angle = np.radians(angle)
+        mat = np.matrix([[np.cos(angle),   0,   np.sin(angle)],
+                        [0,                1,               0],
+                        [-np.sin(angle),   0,   np.cos(angle)]])
+        return np.array(mat.dot([x, y, z]))
+
+ 
+def mat_rotate_x(x, y, z, angle):
+        angle = np.radians(angle)
+        mat = np.matrix([[1,             0,              0],
+                         [0, np.cos(angle), -np.sin(angle)],
+                         [0, np.sin(angle),  np.cos(angle)]])
+        return np.array(mat.dot([x, y, z]))
+
+if __name__ == "__main__":
+
+    """
+    Example of using these functions with binned_statistic. These values are not
+    representative of true distributions of positions and velocity just to debug.
+    """
+
+    data = LoadData()
+    x = data['x'].values
+    y = data['y'].values
+    z = data['z'].values
+    vx = data['vx'].values
+    vy = data['vy'].values
+    vz = data['vz'].values
+    bins = 10
+    
+    print('Vx min max')
+    print(vx.min(), vx.max())
+
+    print('Vy min max')
+    print(vy.min(), vy.max())
+
+    print('Vz min max')
+    print(vz.min(), vz.max())
+
+    plt.scatter(vx, vy, c='red', s=1, alpha=0.3,
+                   cmap='viridis')
+    # plt.colorbar();  # show color scale
+    plt.savefig('R1-test-vxy.png')
+    plt.clf()
+
+    plt.scatter(vx, vz, c='red', s=1, alpha=0.3,
+                   cmap='viridis')
+    # plt.colorbar();  # show color scale
+    plt.savefig('R1-test-vxz.png')
+    plt.clf()
+
+    plt.scatter(vy, vz, c='red', s=1, alpha=0.3,
+                   cmap='viridis')
+    # plt.colorbar();  # show color scale
+    plt.savefig('R1-test-vyz.png')
+    plt.clf()
+
+    plt.scatter(x, y, c=vz, s=1, alpha=0.3, cmap='viridis')
+    plt.xlabel('kPc')
+    plt.ylabel('kPc')
+    axes=plt.gca()
+    axes.set_aspect(1)
+    plt.colorbar();  # show color scale
+    plt.title('R1 face-on')
+    plt.savefig('R1-test1.png')
+    plt.clf()
+
+    data1 = mat_rotate_x(x, y, z, 90)
+    x = data1[0,:]
+    y = data1[1,:]
+    z = data1[2,:]
+
+    plt.scatter(x, y, c=vx, s=1, alpha=0.3, cmap='viridis')
+    plt.xlabel('kPc')
+    plt.ylabel('kPc')
+    axes=plt.gca()
+    axes.set_aspect(1)
+    plt.colorbar();  # show color scale
+    plt.title('R1 edge-on')
+    plt.savefig('R1-test2.png')
+    plt.clf()
+
+    data1 = mat_rotate_y(x, y, z, 90)
+    x = data1[0,:]
+    y = data1[1,:]
+    z = data1[2,:]
+
+    plt.scatter(x, y, c=vy, s=1, alpha=0.3, cmap='viridis')
+    plt.xlabel('kPc')
+    plt.ylabel('kPc')
+    axes=plt.gca()
+    axes.set_aspect(1)
+    plt.colorbar();  # show color scale
+    plt.title('R1 side-on')
+    plt.savefig('R1-test3.png')
+    plt.clf()
+
+    #print(len(x))
+    #print(len(y))
+    #print(len(vz))
+    '''
+    stat,edges,binnum = stats.binned_statistic(x, vz,
+                                   statistic=lambda bin_values: \
+                                   GaussHermiteMoment(bin_values, 4),
+                                   bins=bins)
+    
+    print()
+    print('stat = ' + str(stat))
+    print('edges = ' + str(edges))
+    print('binnum = ' + str(binnum))
+    
+    stat2d,xedges,yedges,binnum2d = stats.binned_statistic_2d(x, y ,vz,
+                                  statistic=lambda bin_values: \
+                                  GaussHermiteMoment(bin_values, 4),
+                                  bins=bins)
+    
+    print()
+    print('sta2d = ' + str(stat2d))
+    print('xedges = ' + str(xedges))
+    print('yedges = ' + str(yedges))
+    print('binnum2d = ' + str(binnum2d))
+    '''
+
+    #print(len(stat),len(edges),len(binnum))
+    #print()
+    #print(len(stat2d),len(xedges),len(yedges),len(binnum2d))
+    #print(stat2d,xedges,yedges,binnum2d)
