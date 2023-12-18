@@ -2,7 +2,7 @@
 import numpy as np 
 import matplotlib.pyplot as plt
 
-# Data Cooedinates
+# Data Coordinates
 x = np.arange(5, 10) 
 y = np.arange(12, 17)
 # PLot
@@ -13,8 +13,8 @@ plt.title("Matplotlib PLot NumPy Array")
 plt.xlabel("x axis") 
 plt.ylabel("y axis") 
 # Display
-# plt.show()
+plt.show()
 # Save
-plt.savefig('tests/images/test1.png')
-plt.savefig('tests/images/test1.pdf')
+plt.savefig('images/test1.png')
+#plt.savefig('tests/images/test1.pdf')
 
