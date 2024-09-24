@@ -1335,14 +1335,15 @@ def sigma_shape_by_age_combined_Fm(sim,bin_width,bin_arc,xlim,sigmaFm,snap,image
 
 def plot_sigma_amp_bar_ellip_timeline(model,aF_peaks,e_list,snap_ages,plot_bar_ellipticity,image_dir,save_file=True,show_plot=True,verbose_log=False):
     # Plot the sigma amplitude and bar ellipticity diagram
-    xlab = r'$Age \rm \enspace [Gyr]$'
-    ylab = r'$Amplitude$'
-    if plot_bar_ellipticity: y2lab = r'$Ellipticity$'
+    xlab = 'Age [Gyr]'
+    ylab = 'Sigma amplitude peaks'
+    if plot_bar_ellipticity: y2lab = 'Bar ellipticities'
 
-    fig, axes = plt.subplots(1, 1, figsize=(8, 4))
+    fig, axes = plt.subplots(1, 1, figsize=(10, 4))
     ax = axes
     ax2 = ax.twinx()
     fs = 8
+    fs_l = 6
 
     aF_peaks_grp1_m4 = []
     aF_peaks_grp1_m6 = []
@@ -1371,23 +1372,36 @@ def plot_sigma_amp_bar_ellip_timeline(model,aF_peaks,e_list,snap_ages,plot_bar_e
             e_list_grp2.append(elem[1])
             e_list_grp3.append(elem[2])
 
-    ax.plot(snap_ages, aF_peaks_grp1_m4, c='r', label='r$Amplitude$')
-    ax.plot(snap_ages, aF_peaks_grp1_m6, c='r', linestype='-.')
+    ax.plot(snap_ages, aF_peaks_grp1_m4, c='r', linestyle='-', label='Group 1 Fm=4')
+    ax.plot(snap_ages, aF_peaks_grp1_m6, c='r', linestyle='-.', label='Group 1 Fm=6')
+    ax.plot(snap_ages, aF_peaks_grp2_m4, c='g', linestyle='-', label='Group 2 Fm=4')
+    ax.plot(snap_ages, aF_peaks_grp2_m6, c='g', linestyle='-.', label='Group 2 Fm=6')
+    ax.plot(snap_ages, aF_peaks_grp3_m4, c='b', linestyle='-', label='Group 3 Fm=4')
+    ax.plot(snap_ages, aF_peaks_grp3_m6, c='b', linestyle='-.', label='Group 3 Fm=6')
     ax.tick_params(axis='both', which='both', labelsize=fs)
     ax.set_xlabel(xlab, fontsize=fs)
-    ax.set_ylabel(ylab, fontsize=fs, c='r')
+    ax.set_ylabel(ylab, fontsize=fs, c='k')
     ax.set_xlim(np.nanmin(snap_ages), np.nanmax(snap_ages))
+    ax.legend(loc="upper left")
 
     if plot_bar_ellipticity:
-        ax2.plot(snap_ages, e_list_grp1, c='b', label='$Ellipticity$')
+        ax2.plot(snap_ages, e_list_grp1, c='r', label='Group 1 bar ellipticity', linestyle=':')
+        ax2.plot(snap_ages, e_list_grp2, c='g', label='Group 2 bar ellipticity', linestyle=':')
+        ax2.plot(snap_ages, e_list_grp3, c='b', label='Group 3 bar ellipticity', linestyle=':')
         ax2.tick_params(axis='both', which='both', labelsize=fs)
-        ax2.set_ylabel(y2lab, fontsize=fs, c='b')
+        ax2.set_ylabel(y2lab, fontsize=fs, c='k')
+        ax2.legend(loc="upper right")
+        #ax2.axis('equal')
 
-    title = model.replace("run","") + " amplitude and ellipticity timeline"
+    #plt.legend()
+    #ax.axis('equal')
+    #leg = ax.legend(loc="upper left")
+
+    title = model.replace("run","") + " sigma amplitude peaks and bar ellipticities evolution"
     ax.title.set_text(title)
 
     if save_file:
-        image_name = image_dir + model.replace("run","") + '_sigma_amp_bar_allip.png'
+        image_name = image_dir + model.replace("run","") + '_sigma_amp_bar_ellip.png'
         plt.savefig(image_name)
         print("Image saved to",image_name)
     else:
