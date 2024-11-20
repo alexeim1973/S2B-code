@@ -1,4 +1,3 @@
-
 import scipy
 from scipy import stats as st
 import pynbody as pb
@@ -10,7 +9,6 @@ from mpl_toolkits.axes_grid1 import make_axes_locatable
 from scipy.ndimage import gaussian_filter as gf
 from scipy.signal import find_peaks as find_peaks
 import os
-
 
 # Reads snapshot names and param file names from the model directory
 def list_snaps(model_dir,verbose_log):
@@ -219,7 +217,15 @@ def sum_columns_and_rows(matrix):
 
 
 # Plots face-on number dencity
-def plot_density(x,y,z,xlim,ylim,bins,snap,image_dir,save_file=True,show_plot=True):
+def plot_density(cmap,x,y,z,age,xlim,ylim,bins,snap,image_dir,save_file=True,show_plot=True,verbose_log=True):
+
+    # Print snapshot max and min ages and number of stars
+    min_age = round(min(age),2)
+    max_age = round(max(age),2)
+    if verbose_log:
+        print('* Min stellar age - ' + str(min_age) + ' Gyr.')
+        print('* Max stellar age - ' + str(max_age) + ' Gyr.')
+        print('** Stars in snapshot - ', len(x))
 
     # Number density statistics face-on for stellar population by age group
     df_stat2d,df_xedges,df_yedges,df_binnum2d = st.binned_statistic_2d(x, y, z,
@@ -231,7 +237,7 @@ def plot_density(x,y,z,xlim,ylim,bins,snap,image_dir,save_file=True,show_plot=Tr
                 origin = 'lower',
                 extent = [-xlim, xlim, -ylim, ylim ],
                 norm = LogNorm(),
-                cmap = "magma")
+                cmap = cmap)
     xcent = (df_xedges[1:] + df_xedges[:-1]) / 2
     ycent = (df_yedges[1:] + df_yedges[:-1]) / 2
     plt.contour(xcent, ycent, np.log10(df_stat2d.T), linewidths = 0.5, linestyles = 'dashed', colors = 'k')
@@ -252,7 +258,7 @@ def plot_density(x,y,z,xlim,ylim,bins,snap,image_dir,save_file=True,show_plot=Tr
 
 
 # Plots number dencity for age groups
-def plot_density_by_age(sim,pos,xlim,ylim,bins,snap,image_dir,save_file=True,show_plot=True,verbose_log=False):
+def plot_density_by_age(cmap,sim,pos,xlim,ylim,bins,snap,image_dir,save_file=True,show_plot=True,verbose_log=False):
 
     x_panels = 3
     y_panels = 1
@@ -269,7 +275,7 @@ def plot_density_by_age(sim,pos,xlim,ylim,bins,snap,image_dir,save_file=True,sho
     max_age = round(max(sim.star['age']),2)
     if verbose_log:
         print('* Max stellar age - ' + str(max_age) + ' Gyr.')
-        print('** Total stars in snapshot - ', len(sim.star))
+        print('** Stars in snapshot - ', len(sim.star))
             
     # Number density statistics per age group
     div = 1/3
@@ -302,7 +308,7 @@ def plot_density_by_age(sim,pos,xlim,ylim,bins,snap,image_dir,save_file=True,sho
                             origin = 'lower',
                             extent = [-xlim, xlim, -ylim, ylim ],
                             norm = LogNorm(),
-                            cmap = "magma")
+                            cmap = cmap)
                 xcent = (dfg_xedges[1:] + dfg_xedges[:-1]) / 2
                 ycent = (dfg_yedges[1:] + dfg_yedges[:-1]) / 2
                 axes[i].contour(xcent, ycent, np.log10(stat2d_lst[i]), linewidths = 0.5, linestyles = 'dashed', colors = 'k')
@@ -719,7 +725,7 @@ def bar_length_by_age_Fm(sim,bin_width,xlim,Fm,snap,image_dir,save_file=True,sho
 
 
 # Plots edge-on sigma for age groups
-def plot_sigma_by_age(sim,xlim,ylim,bins,snap,image_dir,save_file=True,show_plot=True,verbose_log=False):
+def plot_sigma_by_age(cmap,sim,xlim,ylim,bins,snap,image_dir,save_file=True,show_plot=True,verbose_log=False):
 
     x_panels = 3
     y_panels = 1
@@ -768,7 +774,7 @@ def plot_sigma_by_age(sim,xlim,ylim,bins,snap,image_dir,save_file=True,show_plot
                 image = axes[i].imshow(stat2d_lst[i], 
                             origin = 'lower',
                             extent = [-xlim, xlim, -ylim, ylim ],
-                            cmap = "magma")
+                            cmap = cmap)
                 xcent = (vdg_xedges[1:] + vdg_xedges[:-1]) / 2
                 ycent = (vdg_yedges[1:] + vdg_yedges[:-1]) / 2
                 axes[i].contour(xcent, ycent, stat2d_lst[i], linewidths = 0.5, linestyles = 'dashed', colors = 'w')
@@ -1333,10 +1339,10 @@ def sigma_shape_by_age_combined_Fm(sim,bin_width,bin_arc,xlim,sigmaFm,snap,image
     return aF_max_age_grp, max_age
 
 
-def plot_sigma_amp_bar_ellip_timeline(model,aF_peaks,e_list,snap_ages,plot_bar_ellipticity,image_dir,save_file=True,show_plot=True,verbose_log=False):
+def plot_sigma_amp_bar_ellip_timeline(model,aF_peaks,e_list,snap_ages,plot_bar_ellipticity,plot_sigma_amp,image_dir,save_file=True,show_plot=True,verbose_log=False):
     # Plot the sigma amplitude and bar ellipticity diagram
     xlab = 'Age [Gyr]'
-    ylab = 'Sigma amplitude peaks'
+    if plot_sigma_amp: ylab = 'Sigma amplitude peaks'
     if plot_bar_ellipticity: y2lab = 'Bar ellipticities'
 
     fig, axes = plt.subplots(1, 1, figsize=(10, 4))
@@ -1345,46 +1351,43 @@ def plot_sigma_amp_bar_ellip_timeline(model,aF_peaks,e_list,snap_ages,plot_bar_e
     fs = 8
     fs_l = 6
 
-    aF_peaks_grp1_m4 = []
-    aF_peaks_grp1_m6 = []
-    aF_peaks_grp2_m4 = []
-    aF_peaks_grp2_m6 = []
-    aF_peaks_grp3_m4 = []
-    aF_peaks_grp3_m6 = []
+    if plot_sigma_amp:
+        aF_peaks_grp1_m4 = []
+        aF_peaks_grp1_m6 = []
+        aF_peaks_grp2_m4 = []
+        aF_peaks_grp2_m6 = []
+        aF_peaks_grp3_m4 = []
+        aF_peaks_grp3_m6 = []
     
+        # Unpack arrays for plotting
+        for elem in aF_peaks:
+            aF_peaks_grp1_m4.append(elem[0][0])
+            aF_peaks_grp1_m6.append(elem[0][1])
+            aF_peaks_grp2_m4.append(elem[1][0])
+            aF_peaks_grp2_m6.append(elem[1][1])
+            aF_peaks_grp3_m4.append(elem[2][0])
+            aF_peaks_grp3_m6.append(elem[2][1])
+
+        ax.plot(snap_ages, aF_peaks_grp1_m4, c='r', linestyle='-', label='Group 1 Fm=4')
+        ax.plot(snap_ages, aF_peaks_grp1_m6, c='r', linestyle='-.', label='Group 1 Fm=6')
+        ax.plot(snap_ages, aF_peaks_grp2_m4, c='g', linestyle='-', label='Group 2 Fm=4')
+        ax.plot(snap_ages, aF_peaks_grp2_m6, c='g', linestyle='-.', label='Group 2 Fm=6')
+        ax.plot(snap_ages, aF_peaks_grp3_m4, c='b', linestyle='-', label='Group 3 Fm=4')
+        ax.plot(snap_ages, aF_peaks_grp3_m6, c='b', linestyle='-.', label='Group 3 Fm=6')
+        ax.tick_params(axis='both', which='both', labelsize=fs)
+        ax.set_ylabel(ylab, fontsize=fs, c='k')
+        ax.legend(loc="upper left")
+
     if plot_bar_ellipticity:
         e_list_grp1 = []
         e_list_grp2 = []
         e_list_grp3 = []
 
-    # Unpack arrays for plotting
-    for elem in aF_peaks:
-        aF_peaks_grp1_m4.append(elem[0][0])
-        aF_peaks_grp1_m6.append(elem[0][1])
-        aF_peaks_grp2_m4.append(elem[1][0])
-        aF_peaks_grp2_m6.append(elem[1][1])
-        aF_peaks_grp3_m4.append(elem[2][0])
-        aF_peaks_grp3_m6.append(elem[2][1])
-
-    if plot_bar_ellipticity:
         for elem in e_list:
             e_list_grp1.append(elem[0])
             e_list_grp2.append(elem[1])
             e_list_grp3.append(elem[2])
 
-    ax.plot(snap_ages, aF_peaks_grp1_m4, c='r', linestyle='-', label='Group 1 Fm=4')
-    ax.plot(snap_ages, aF_peaks_grp1_m6, c='r', linestyle='-.', label='Group 1 Fm=6')
-    ax.plot(snap_ages, aF_peaks_grp2_m4, c='g', linestyle='-', label='Group 2 Fm=4')
-    ax.plot(snap_ages, aF_peaks_grp2_m6, c='g', linestyle='-.', label='Group 2 Fm=6')
-    ax.plot(snap_ages, aF_peaks_grp3_m4, c='b', linestyle='-', label='Group 3 Fm=4')
-    ax.plot(snap_ages, aF_peaks_grp3_m6, c='b', linestyle='-.', label='Group 3 Fm=6')
-    ax.tick_params(axis='both', which='both', labelsize=fs)
-    ax.set_xlabel(xlab, fontsize=fs)
-    ax.set_ylabel(ylab, fontsize=fs, c='k')
-    ax.set_xlim(np.nanmin(snap_ages), np.nanmax(snap_ages))
-    ax.legend(loc="upper left")
-
-    if plot_bar_ellipticity:
         ax2.plot(snap_ages, e_list_grp1, c='r', label='Group 1 bar ellipticity', linestyle=':')
         ax2.plot(snap_ages, e_list_grp2, c='g', label='Group 2 bar ellipticity', linestyle=':')
         ax2.plot(snap_ages, e_list_grp3, c='b', label='Group 3 bar ellipticity', linestyle=':')
@@ -1397,11 +1400,27 @@ def plot_sigma_amp_bar_ellip_timeline(model,aF_peaks,e_list,snap_ages,plot_bar_e
     #ax.axis('equal')
     #leg = ax.legend(loc="upper left")
 
-    title = model.replace("run","") + " sigma amplitude peaks and bar ellipticities evolution"
+    ax.set_xlabel(xlab, fontsize=fs)
+    ax.set_xlim(np.nanmin(snap_ages), np.nanmax(snap_ages))
+    if plot_bar_ellipticity and plot_sigma_amp:
+        title = model.replace("run","") + " sigma amplitude peaks and bar ellipticities evolution"
+    elif plot_bar_ellipticity:
+        title = model.replace("run","") + " bar ellipticities evolution"
+    elif plot_sigma_amp:
+        title = model.replace("run","") + " sigma amplitude peaks evolution"
+    else:
+        title = model.replace("run","") + " WTF evolution"
     ax.title.set_text(title)
 
     if save_file:
-        image_name = image_dir + model.replace("run","") + '_sigma_amp_bar_ellip.png'
+        if plot_bar_ellipticity and plot_sigma_amp:
+            image_name = image_dir + model.replace("run","") + '_sigma_amp_bar_ellip.png'
+        elif plot_bar_ellipticity:
+            image_name = image_dir + model.replace("run","") + '_bar_ellip.png'
+        elif plot_sigma_amp:
+            image_name = image_dir + model.replace("run","") + '_sigma_amp.png'
+        else:
+            image_name = image_dir + model.replace("run","") + '_WTF.png'
         plt.savefig(image_name)
         print("Image saved to",image_name)
     else:
