@@ -20,10 +20,10 @@ def list_snaps(model_dir,verbose_log):
     # Iterate directory
     for path in os.listdir(model_dir):
         # check if current path is a file
-        if os.path.isfile(os.path.join(model_dir, path)) and '.gz' in path:
-            snap_lst.append(path)
-        elif os.path.isfile(os.path.join(model_dir, path)) and '.param' in path:
+        if os.path.isfile(os.path.join(model_dir, path)) and '.param' in path:
             param_lst.append(path)
+        elif os.path.isfile(os.path.join(model_dir, path)) and '.param' not in path:
+            snap_lst.append(path)
     
     if verbose_log:
         print(snap_lst)
@@ -272,11 +272,17 @@ def plot_density_by_age(cmap,sim,pos,xlim,ylim,bins,snap,image_dir,save_file=Tru
     stat2d_lst = []
 
     # Divide snapshot into 3 age groups
+    min_age = round(min(sim.star['age']),2)
     max_age = round(max(sim.star['age']),2)
     if verbose_log:
+        print('* Min stellar age - ' + str(min_age) + ' Gyr.')
         print('* Max stellar age - ' + str(max_age) + ' Gyr.')
         print('** Stars in snapshot - ', len(sim.star))
-            
+    if min_age == max_age:
+        print("** Cannot split into age groups for this snapshot.")
+        print("** The min age and the max age of the stars are the same.")
+        exit
+
     # Number density statistics per age group
     div = 1/3
     divlr_lst = [[0,div],[div,2*div],[2*div,max_age]]
@@ -388,10 +394,16 @@ def bar_ellipticity_by_age(sim,xlim,ylim,bins,snap,image_dir,save_file=True,show
         fig,axes = plt.subplots(y_panels,x_panels,figsize=(figsize_x,figsize_y))
     
     # Divide snapshot into 3 age groups
+    min_age = round(min(sim.star['age']),2)
     max_age = round(max(sim.star['age']),2)
     if verbose_log:
+        print('* Min stellar age - ' + str(min_age) + ' Gyr.')
         print('* Max stellar age - ' + str(max_age) + ' Gyr.')
-        print('** Total stars in snapshot - ', len(sim.star))
+        print('** Stars in snapshot - ', len(sim.star))
+    if min_age == max_age:
+        print("** Cannot split into age groups for this snapshot.")
+        print("** The min age and the max age of the stars are the same.")
+        exit
             
     # Number density statistics per age group
     div = 1/3
@@ -698,10 +710,16 @@ def bar_length_Fm(sim,bin_width,xlim,Fm,snap,image_dir,age_grp=0,save_file=True,
 def bar_length_by_age_Fm(sim,bin_width,xlim,Fm,snap,image_dir,save_file=True,show_plot=True,verbose_log=False):
 
     # Divide snapshot into 3 age groups
+    min_age = round(min(sim.star['age']),2)
     max_age = round(max(sim.star['age']),2)
     if verbose_log:
+        print('* Min stellar age - ' + str(min_age) + ' Gyr.')
         print('* Max stellar age - ' + str(max_age) + ' Gyr.')
-        print('** Total stars in snapshot - ', len(sim.star))
+        print('** Stars in snapshot - ', len(sim.star))
+    if min_age == max_age:
+        print("** Cannot split into age groups for this snapshot.")
+        print("** The min age and the max age of the stars are the same.")
+        exit
             
     # Number density statistics per age group
     div = 1/3
@@ -739,10 +757,16 @@ def plot_sigma_by_age(cmap,sim,xlim,ylim,bins,snap,image_dir,save_file=True,show
     stat2d_lst = []
 
     # Divide snapshot into 3 age groups
+    min_age = round(min(sim.star['age']),2)
     max_age = round(max(sim.star['age']),2)
     if verbose_log:
+        print('* Min stellar age - ' + str(min_age) + ' Gyr.')
         print('* Max stellar age - ' + str(max_age) + ' Gyr.')
-        print('** Total stars in snapshot - ', len(sim.star))
+        print('** Stars in snapshot - ', len(sim.star))
+    if min_age == max_age:
+        print("** Cannot split into age groups for this snapshot.")
+        print("** The min age and the max age of the stars are the same.")
+        exit
             
     # Number density statistics per age group
     div = 1/3
@@ -1010,11 +1034,16 @@ def sigma_shape_Fm(sim,bin_width,bin_arc,xlim,Fm,snap,image_dir,age_grp=0,save_f
 def sigma_shape_by_age_Fm(sim,bin_width,bin_arc,xlim,Fm,snap,image_dir,save_file=True,show_plot=True,verbose_log=False):
 
     # Divide snapshot into 3 age groups
+    min_age = round(min(sim.star['age']),2)
     max_age = round(max(sim.star['age']),2)
     if verbose_log:
-    # Debug output
+        print('* Min stellar age - ' + str(min_age) + ' Gyr.')
         print('* Max stellar age - ' + str(max_age) + ' Gyr.')
-        print('** Total stars in snapshot - ', len(sim.star))
+        print('** Stars in snapshot - ', len(sim.star))
+    if min_age == max_age:
+        print("** Cannot split into age groups for this snapshot.")
+        print("** The min age and the max age of the stars are the same.")
+        exit
             
     # Number density statistics per age group
     div = 1/3
@@ -1054,10 +1083,16 @@ def sigma_shape_by_age_combined_Fm(sim,bin_width,bin_arc,xlim,sigmaFm,snap,image
     fig,axes = plt.subplots(y_panels,x_panels,figsize=(figsize_x,figsize_y))
     
     # Divide snapshot into 3 age groups
+    min_age = round(min(sim.star['age']),2)
     max_age = round(max(sim.star['age']),2)
     if verbose_log:
+        print('* Min stellar age - ' + str(min_age) + ' Gyr.')
         print('* Max stellar age - ' + str(max_age) + ' Gyr.')
-        print('** Total stars in snapshot - ', len(sim.star))
+        print('** Stars in snapshot - ', len(sim.star))
+    if min_age == max_age:
+        print("** Cannot split into age groups for this snapshot.")
+        print("** The min age and the max age of the stars are the same.")
+        exit
             
     # Number density statistics per age group
     div = 1/3
@@ -1253,7 +1288,7 @@ def sigma_shape_by_age_combined_Fm(sim,bin_width,bin_arc,xlim,sigmaFm,snap,image
             aF_max_index = aF_plot.index(aF_max)
             aF_max_R = radial_bins[aF_max_index]
 
-            print("Age group", age_grp, "- Fm", Fm, "- AMPLITUDE peak in [0:1] kpc area is", round(aF_max,2), "at radius", round(aF_max_R,1), "kpc.")
+            print("Age group", age_grp, "- Fm", Fm, "- AMPLITUDE peak in [", -xlim, ":", xlim, "] kpc area is", round(aF_max,2), "at radius", round(aF_max_R,1), "kpc.")
 
             aF_plot_comb.append(aF_plot)
             phiF_plot_comb.append(phiF_plot)
