@@ -5,6 +5,10 @@ from datetime import datetime
 from xml.etree.ElementInclude import include
 from matplotlib.colors import LogNorm
 from matplotlib.pylab import *
+from matplotlib.backends.backend_pdf import PdfPages
+from matplotlib.transforms import Bbox
+from matplotlib.figure import Figure
+from matplotlib.backends.backend_agg import FigureCanvasAgg as FigureCanvas
 from mpl_toolkits.axes_grid1 import make_axes_locatable
 from scipy.ndimage import gaussian_filter as gf
 from scipy.signal import find_peaks as find_peaks
@@ -217,7 +221,16 @@ def sum_columns_and_rows(matrix):
 
 
 # Plots face-on number dencity
-def plot_density(cmap,x,y,z,age,xlim,ylim,bins,snap,image_dir,save_file=True,show_plot=True,verbose_log=True):
+def plot_density(cmap,x,y,z,age,xlim,ylim,bins,snap,image_dir,show_e=False,save_file=True,show_plot=True,verbose_log=True):
+
+    x_panels = 1
+    y_panels = 1
+
+    figsize_x = 5*x_panels    # inches
+    figsize_y = 5*y_panels    # inches
+
+    # Make the figure and sub plots
+    fig,axes = plt.subplots(y_panels,x_panels,figsize=(figsize_x,figsize_y))
 
     # Print snapshot max and min ages and number of stars
     min_age = round(min(age),2)
@@ -233,7 +246,15 @@ def plot_density(cmap,x,y,z,age,xlim,ylim,bins,snap,image_dir,save_file=True,sho
                                     range = [[-xlim,xlim],[-ylim,ylim]],
                                     bins = bins)
 
-    plt.imshow(df_stat2d.T, 
+    if show_e:
+            unit = 2*xlim/bins
+            if verbose_log:
+                print("Unit in kpc:", round(unit,2))
+
+            e = ellipticity(unit,bins,df_stat2d)
+            print('*** Ellipticity:', e)
+
+    image = plt.imshow(df_stat2d.T, 
                 origin = 'lower',
                 extent = [-xlim, xlim, -ylim, ylim ],
                 norm = LogNorm(),
@@ -241,7 +262,17 @@ def plot_density(cmap,x,y,z,age,xlim,ylim,bins,snap,image_dir,save_file=True,sho
     xcent = (df_xedges[1:] + df_xedges[:-1]) / 2
     ycent = (df_yedges[1:] + df_yedges[:-1]) / 2
     plt.contour(xcent, ycent, np.log10(df_stat2d.T), linewidths = 0.5, linestyles = 'dashed', colors = 'k')
-    plt.title(snap + " - face-on num density.")
+    if show_e:
+        plt.title(snap + " - face-on num density. Bar ellipticity " + str(e))
+    else:
+        plt.title(snap + " - face-on num density.")
+    axes = plt.gca()
+    axes.set_xlabel('x [kpc]')
+    axes.set_ylabel('y [kpc]')
+
+    divider = make_axes_locatable(axes)
+    cax = divider.append_axes('right', size='5%', pad=0.05)
+    cbar = plt.colorbar(image, cax=cax, orientation='vertical')
 
     if save_file:
         image_name = image_dir + snap.replace(".gz","") + '_density_' + str(xlim) + 'kpc' + '.png'
@@ -254,11 +285,11 @@ def plot_density(cmap,x,y,z,age,xlim,ylim,bins,snap,image_dir,save_file=True,sho
     else:
         print("On-screen ploting is turned off.")
 
-    return None
+    return fig
 
 
 # Plots number dencity for age groups
-def plot_density_by_age(cmap,sim,pos,xlim,ylim,bins,snap,image_dir,save_file=True,show_plot=True,verbose_log=False):
+def plot_density_by_age(cmap,sim,pos,xlim,ylim,bins,snap,image_dir,e_list=False,save_file=True,show_plot=True,verbose_log=False):
 
     x_panels = 3
     y_panels = 1
@@ -298,7 +329,9 @@ def plot_density_by_age(cmap,sim,pos,xlim,ylim,bins,snap,image_dir,save_file=Tru
         grp = sim.star[mask]
         if verbose_log:
             print('*** Stars in age group', age_grp, ' - ', len(grp.star['age']))
-    
+            if e_list:
+                print("*** Bar ellipticity - ", e_list[age_grp-1])
+        
         #Extract phase space data for the model for stars in the group
         z_, x_, y_ = grp.star['z'], grp.star['x'], grp.star['y']
     
@@ -318,7 +351,10 @@ def plot_density_by_age(cmap,sim,pos,xlim,ylim,bins,snap,image_dir,save_file=Tru
                 xcent = (dfg_xedges[1:] + dfg_xedges[:-1]) / 2
                 ycent = (dfg_yedges[1:] + dfg_yedges[:-1]) / 2
                 axes[i].contour(xcent, ycent, np.log10(stat2d_lst[i]), linewidths = 0.5, linestyles = 'dashed', colors = 'k')
-                axes[i].title.set_text("Age group " + str(i+1))
+                if e_list:
+                    axes[i].title.set_text("Age group " + str(i+1) + " e = " + str(e_list[i]))
+                else:
+                    axes[i].title.set_text("Age group " + str(i+1))
                 circle1 = plt.Circle((0, 0), 0.5, color='green', fill=False)
                 circle2 = plt.Circle((0, 0), 0.75, color='green', fill=False)
                 axes[i].add_patch(circle1)
@@ -349,7 +385,7 @@ def plot_density_by_age(cmap,sim,pos,xlim,ylim,bins,snap,image_dir,save_file=Tru
 
     del stat2d_lst
 
-    return None
+    return fig
 
 
 # This function calculates a bar ellipticity
@@ -742,6 +778,65 @@ def bar_length_by_age_Fm(sim,bin_width,xlim,Fm,snap,image_dir,save_file=True,sho
     return None
 
 
+# Plots edge-on sigma
+def plot_sigma(cmap,sim,xlim,ylim,bins,snap,image_dir,save_file=True,show_plot=True,verbose_log=False):
+
+    x_panels = 1
+    y_panels = 1
+
+    figsize_x = 5*x_panels    # inches
+    figsize_y = 5*y_panels    # inches
+
+    # Make the figure and sub plots
+    fig,axes = plt.subplots(y_panels,x_panels,figsize=(figsize_x,figsize_y))
+    
+    #Extract phase space data for the model
+    vz_, x_, y_ = sim.star['vz'], sim.star['x'], sim.star['y']
+    
+    # Number density statistics face-on for stellar population by age group
+    vd_stat2d,vd_xedges,vd_yedges,df_binnum2d = st.binned_statistic_2d(x_, y_, vz_,
+                                    statistic = 'std',
+                                    range = [[-xlim,xlim],[-ylim,ylim]],
+                                    bins = bins)
+    
+    image = plt.imshow(vd_stat2d, 
+                origin = 'lower',
+                extent = [-xlim, xlim, -ylim, ylim ],
+                cmap = cmap)
+    xcent = (vd_xedges[1:] + vd_xedges[:-1]) / 2
+    ycent = (vd_yedges[1:] + vd_yedges[:-1]) / 2
+    plt.contour(xcent, ycent, vd_stat2d, linewidths = 0.5, linestyles = 'dashed', colors = 'w')
+    circle1 = plt.Circle((0, 0), 3, color='green', fill=False)
+    circle2 = plt.Circle((0, 0), 4, color='green', fill=False)
+    axes = plt.gca()
+    axes.add_patch(circle1)
+    axes.add_patch(circle2)
+
+    divider = make_axes_locatable(axes)
+    cax = divider.append_axes('right', size='5%', pad=0.05)
+    cbar = plt.colorbar(image, cax=cax, orientation='vertical')
+
+    fig.tight_layout()
+    fig.suptitle(snap.replace(".gz","") + " LOS velocity dispersion.")
+    axes.set_xlabel('y [kpc]')
+    axes.set_ylabel('z [kpc]')
+
+    if save_file:
+        image_name = image_dir + snap.replace(".gz","") + '_sigma_' + str(xlim) + 'kpc' + '.png'
+        plt.savefig(image_name)
+        print("Image saved to",image_name)
+    else:
+        print("Image saving is turned off.")
+    if show_plot:
+        plt.show()
+    else:
+        print("On-screen ploting is turned off.")
+
+    del vd_stat2d
+
+    return fig
+
+
 # Plots edge-on sigma for age groups
 def plot_sigma_by_age(cmap,sim,xlim,ylim,bins,snap,image_dir,save_file=True,show_plot=True,verbose_log=False):
 
@@ -803,8 +898,9 @@ def plot_sigma_by_age(cmap,sim,xlim,ylim,bins,snap,image_dir,save_file=True,show
                 ycent = (vdg_yedges[1:] + vdg_yedges[:-1]) / 2
                 axes[i].contour(xcent, ycent, stat2d_lst[i], linewidths = 0.5, linestyles = 'dashed', colors = 'w')
                 axes[i].title.set_text("Age group " + str(i+1))
-                circle1 = plt.Circle((0, 0), 0.5, color='green', fill=False)
-                circle2 = plt.Circle((0, 0), 0.75, color='green', fill=False)
+                # For nuclear bars teh circle R is 0.5 and 0.75 
+                circle1 = plt.Circle((0, 0), 3, color='green', fill=False)
+                circle2 = plt.Circle((0, 0), 4, color='green', fill=False)
                 axes[i].add_patch(circle1)
                 axes[i].add_patch(circle2)
 
@@ -817,7 +913,7 @@ def plot_sigma_by_age(cmap,sim,xlim,ylim,bins,snap,image_dir,save_file=True,show
 
     fig.tight_layout()
     fig.suptitle(snap.replace(".gz","") + " LOS velocity dispersion.")
-    plt.setp(axes[:], xlabel = 'x [kpc]')
+    plt.setp(axes[:], xlabel = 'y [kpc]')
     plt.setp(axes[0], ylabel = 'z [kpc]')
 
     if save_file:
@@ -833,7 +929,7 @@ def plot_sigma_by_age(cmap,sim,xlim,ylim,bins,snap,image_dir,save_file=True,show
 
     del stat2d_lst
 
-    return None
+    return fig
 
 
 # Plots sigma shape estimation using amplitude and phase of Fourier moments m 4 or 6
@@ -1030,7 +1126,7 @@ def sigma_shape_Fm(sim,bin_width,bin_arc,xlim,Fm,snap,image_dir,age_grp=0,save_f
     return None
 
 
-# Wrap function for age groups, calls sigma_shape2_Fm
+# Wrap function for age groups, calls sigma_shape_Fm
 def sigma_shape_by_age_Fm(sim,bin_width,bin_arc,xlim,Fm,snap,image_dir,save_file=True,show_plot=True,verbose_log=False):
 
     # Divide snapshot into 3 age groups
@@ -1071,7 +1167,7 @@ def sigma_shape_by_age_Fm(sim,bin_width,bin_arc,xlim,Fm,snap,image_dir,save_file
 def sigma_shape_by_age_combined_Fm(sim,bin_width,bin_arc,xlim,sigmaFm,snap,image_dir,age_grp=0,save_file=True,show_plot=True,verbose_log=False):
     
     if verbose_log:
-        print('!!! Function starts executiung here !!!')
+        print('!!! Function starts executiung here !!!') 
 
     x_panels = 3
     y_panels = 1
@@ -1371,7 +1467,366 @@ def sigma_shape_by_age_combined_Fm(sim,bin_width,bin_arc,xlim,sigmaFm,snap,image
     del aF_plot_age_grp
     del phiF_plot_age_grp
 
-    return aF_max_age_grp, max_age
+    return fig, aF_max_age_grp, max_age
+
+
+def plot_sigma_amp_bar_ellip_timeline(model,aF_peaks,e_list,snap_ages,plot_bar_ellipticity,plot_sigma_amp,image_dir,save_file=True,show_plot=True,verbose_log=False):
+    # Plot the sigma amplitude and bar ellipticity diagram
+    xlab = 'Age [Gyr]'
+    if plot_sigma_amp: ylab = 'Sigma amplitude peaks'
+    if plot_bar_ellipticity: y2lab = 'Bar ellipticities'
+
+    fig, axes = plt.subplots(1, 1, figsize=(10, 4))
+    ax = axes
+    ax2 = ax.twinx()
+    fs = 8
+    fs_l = 6
+
+    if plot_sigma_amp:
+        aF_peaks_grp1_m4 = []
+        aF_peaks_grp1_m6 = []
+        aF_peaks_grp2_m4 = []
+        aF_peaks_grp2_m6 = []
+        aF_peaks_grp3_m4 = []
+        aF_peaks_grp3_m6 = []
+    
+        # Unpack arrays for plotting
+        for elem in aF_peaks:
+            aF_peaks_grp1_m4.append(elem[0][0])
+            aF_peaks_grp1_m6.append(elem[0][1])
+            aF_peaks_grp2_m4.append(elem[1][0])
+            aF_peaks_grp2_m6.append(elem[1][1])
+            aF_peaks_grp3_m4.append(elem[2][0])
+            aF_peaks_grp3_m6.append(elem[2][1])
+
+        ax.plot(snap_ages, aF_peaks_grp1_m4, c='r', linestyle='-', label='Group 1 Fm=4')
+        ax.plot(snap_ages, aF_peaks_grp1_m6, c='r', linestyle='-.', label='Group 1 Fm=6')
+        ax.plot(snap_ages, aF_peaks_grp2_m4, c='g', linestyle='-', label='Group 2 Fm=4')
+        ax.plot(snap_ages, aF_peaks_grp2_m6, c='g', linestyle='-.', label='Group 2 Fm=6')
+        ax.plot(snap_ages, aF_peaks_grp3_m4, c='b', linestyle='-', label='Group 3 Fm=4')
+        ax.plot(snap_ages, aF_peaks_grp3_m6, c='b', linestyle='-.', label='Group 3 Fm=6')
+        ax.tick_params(axis='both', which='both', labelsize=fs)
+        ax.set_ylabel(ylab, fontsize=fs, c='k')
+        ax.legend(loc="upper left")
+
+    if plot_bar_ellipticity:
+        e_list_grp1 = []
+        e_list_grp2 = []
+        e_list_grp3 = []
+
+        for elem in e_list:
+            e_list_grp1.append(elem[0])
+            e_list_grp2.append(elem[1])
+            e_list_grp3.append(elem[2])
+
+        ax2.plot(snap_ages, e_list_grp1, c='r', label='Group 1 bar ellipticity', linestyle=':')
+        ax2.plot(snap_ages, e_list_grp2, c='g', label='Group 2 bar ellipticity', linestyle=':')
+        ax2.plot(snap_ages, e_list_grp3, c='b', label='Group 3 bar ellipticity', linestyle=':')
+        ax2.tick_params(axis='both', which='both', labelsize=fs)
+        ax2.set_ylabel(y2lab, fontsize=fs, c='k')
+        ax2.legend(loc="upper right")
+        #ax2.axis('equal')
+
+    #plt.legend()
+    #ax.axis('equal')
+    #leg = ax.legend(loc="upper left")
+
+    ax.set_xlabel(xlab, fontsize=fs)
+    ax.set_xlim(np.nanmin(snap_ages), np.nanmax(snap_ages))
+    if plot_bar_ellipticity and plot_sigma_amp:
+        title = model.replace("run","") + " sigma amplitude peaks and bar ellipticities evolution"
+    elif plot_bar_ellipticity:
+        title = model.replace("run","") + " bar ellipticities evolution"
+    elif plot_sigma_amp:
+        title = model.replace("run","") + " sigma amplitude peaks evolution"
+    else:
+        title = model.replace("run","") + " WTF evolution"
+    ax.title.set_text(title)
+
+    if save_file:
+        if plot_bar_ellipticity and plot_sigma_amp:
+            image_name = image_dir + model.replace("run","") + '_sigma_amp_bar_ellip.png'
+        elif plot_bar_ellipticity:
+            image_name = image_dir + model.replace("run","") + '_bar_ellip.png'
+        elif plot_sigma_amp:
+            image_name = image_dir + model.replace("run","") + '_sigma_amp.png'
+        else:
+            image_name = image_dir + model.replace("run","") + '_WTF.png'
+        plt.savefig(image_name)
+        print("Image saved to",image_name)
+    else:
+        print("Image saving is turned off.")
+    if show_plot:
+        plt.show()
+    else:
+        print("On-screen ploting is turned off.")
+
+    return None
+
+
+# Plots sigma shape estimation using amplitude and phase of Fourier moments m 4 or 6
+def sigma_shape_combined_Fm(sim,bin_width,bin_arc,xlim,sigmaFm,snap,image_dir,age_grp=0,save_file=True,show_plot=True,verbose_log=False):
+    
+    if verbose_log:
+        print('!!! Function starts executiung here !!!') 
+
+    x_panels = 1
+    y_panels = 1
+
+    figsize_x = 12*x_panels   # inches
+    figsize_y = 5*y_panels    # inches
+
+    # Make the figure and sub plots
+    fig,axes = plt.subplots(y_panels,x_panels,figsize=(figsize_x,figsize_y))
+    
+    max_age = round(max(sim.star['age']),2)
+
+    aF_plot = []
+    phiF_plot = []
+    radial_bins = []
+    aF_max = []
+    aF_max_R = []
+
+    #Extract phase space data for the model
+    x, y, z, vz = sim.s['x'], sim.s['y'], sim.s['z'], sim.s['vz']
+
+    #Calculate the radius of each particle and its cylindrical angle phi
+    Rs = np.hypot(x, z) # Hypotenuse of right angle triangle with x,z
+    phis = np.arctan2(z, x) # in radians
+
+    # Define bins for radius
+    max_radius = np.max(Rs)
+    num_radial_bins = int((max_radius) / bin_width) + 1
+    radial_bins = np.arange(0, num_radial_bins * bin_width, bin_width)
+    if verbose_log:
+        print(radial_bins)
+
+    # Calculate arc bins from a pre-defined bin_arc in degrees
+    arc_bins = int(360/bin_arc) + 1
+
+    # Define bins for theta (angular bins) in radians
+    phi_bins = np.linspace(0, 2 * np.pi, arc_bins)
+
+    if verbose_log:
+            # Debug output
+            print("Radial bin width: ", bin_width, " kpc ", "Max R:", int(Rs.max()), " kpc -> number of radial bins:", num_radial_bins)
+            print("Size of radial bins array", len(radial_bins))
+            #print("Radial bins array: ",radial_bins)
+            print("Arc bin width: ", bin_arc, " deg -> number of arc bins:", arc_bins)
+            print("Size of phi bins array", len(phi_bins))
+            #print("Phi bins array: ", phi_bins)
+            print()
+
+    if verbose_log:
+            # Debug output
+            print("!!! Start calculating Cartesian coordinates for radial bins !!!")
+
+        # Find the radial bin indices
+    radial_bin_indices = np.digitize(Rs, bins=radial_bins) - 1
+        # `np.digitize` returns the index of the bin to which each value belongs
+
+        # Find the angular bin indices
+    phi_bin_indices = np.digitize(phis, bins=phi_bins) - 1
+
+        # Handle periodic boundary condition for angles (wrapping around 2π)
+    Phi_particles_wrapped = (phis + 2 * np.pi) % (2 * np.pi)
+    phi_bin_indices_wrapped = np.digitize(Phi_particles_wrapped, bins=phi_bins) - 1
+
+        # Step 4: Initialize a 2D array to store arrays for each bin
+    num_radial_bins = len(radial_bins) - 1
+    num_phi_bins = len(phi_bins) - 1
+    num_values_bins = 4 # x, y, vz, sigma
+
+        # Initialize the 2D array with empty sub-arrays
+    particles_in_bins = np.empty((num_radial_bins, num_phi_bins, num_values_bins), dtype=object)
+
+    for i in range(num_radial_bins):
+        for j in range(num_phi_bins):
+            for k in range(num_values_bins):
+                if k == 3:
+                    particles_in_bins[i, j, k] = nan
+                else:
+                    particles_in_bins[i, j, k] = []
+
+    for i in range(len(radial_bins) - 1):  # Iterate through radial bins
+        for j in range(len(phi_bins) - 1):  # Iterate through angular bins
+            # Select particles in the current bin
+            in_radial_bin = radial_bin_indices == i
+            in_angular_bin = (phi_bin_indices == j) | (phi_bin_indices_wrapped == j)
+
+                # Combine conditions
+            inside_bin = in_radial_bin & in_angular_bin
+
+                # Get Cartesian coordinates and vz for particles in this bin
+            particles_in_bins[i, j, 0] = x[inside_bin]
+            particles_in_bins[i, j, 1] = y[inside_bin]
+            particles_in_bins[i, j, 2] = vz[inside_bin]
+            particles_in_bins[i, j, 3] = np.std(vz[inside_bin]) # sigma for the bin
+
+                #if verbose_log:
+                #   Debug output
+                #   print(f"Radial bin {i}, Angular Bin {j}, Number of particles {len(particles_in_bins[i, j, 2])}, Std Dev = {particles_in_bins[i,j,3]:.2f}")
+
+        # particles_in_bins now contains lists of particles (with Cartesian coordinates and vz)
+        # for each radial and angular bin combination
+
+        # Remove the last eement to match the other arrays for broadcast operations
+    if verbose_log:
+            # Debug output
+            print("Removing last elements of phi bins and radial bins arrays")
+            print("to match with other arrays for broadcast operations.")
+            print()
+
+    max_size = len(phi_bins)
+    last_index = max_size - 1
+    phi_bins = np.delete(phi_bins,last_index)
+
+    max_size = len(radial_bins)
+    last_index = max_size - 1
+    radial_bins = np.delete(radial_bins,last_index)
+
+    if verbose_log:
+            # Debug output
+            print("New size of radial bins array", len(radial_bins))
+            print("New size of phi bins array", len(phi_bins))
+
+    aF_plot_comb = []   # Amplitude for Fourier moments m=4 and m=6
+    phiF_plot_comb = [] # Phase for Fourier moments m=4 and m=6
+    aF_max_comb = []    # Max amplitude for Fourier moments m=4 and m=6
+    aF_max_R_comb = []  # Max amplitude radii for Fourier moments m=4 and m=6
+
+    for Fm in sigmaFm: # !!! TBD - implement as a stanalone function !!!
+
+        if verbose_log:
+                print('!!! Start calculating and using Fourier moments !!!')
+
+            # for each arc bin with arc "bin_arc" and width "bin_width"
+        sFp = np.sin(Fm * (phi_bins + bin_arc/2))
+        cFp = np.cos(Fm * (phi_bins + bin_arc/2))
+
+        if verbose_log:
+                # Debug output
+                print("Sigma Fourier moment Fm:", Fm)
+                print("Size of sine(Fm * phi) array;", len(sFp))
+                print("Size of cosine(Fm * phi) arra:", len(cFp))
+                print()
+
+        aF_plot = []
+        phiF_plot = []
+
+            # Calculate AMPLITUDE and PHASE per radius
+            # by summing across all phi bins for each radial bin
+            # To be corrected - "range(len(radial_bins) - 1" or "range(len(radial_bins)"
+        for i in range(len(radial_bins)):
+            aF = hypot(np.sum(sFp*particles_in_bins[i,:,3]),np.sum(cFp*particles_in_bins[i,:,3]))/np.sum(particles_in_bins[i,:,3])
+            phiF = (1/Fm) * degrees(arctan2(np.sum(sFp*particles_in_bins[i,:,3]),np.sum(cFp*particles_in_bins[i,:,3])))
+
+            aF_plot.append(aF)
+            phiF_plot.append(phiF)
+
+        if verbose_log:
+                # Debug output
+                print("Size of AMPLITUDE array", len(aF_plot))
+                print("Max value of AMPLITUDE array", round(np.nanmax(aF_plot),2))
+                print()
+
+            # aF_peaks, _ = find_peaks(aF_plot)
+            #aF_max = aF_plot[aF_peaks[0]]
+            #aF_max_R = radial_bins[aF_peaks[0]]
+        idx_1kpc = np.where(radial_bins == 1.)[0][0]
+        aF_plot_1kpc = aF_plot[:idx_1kpc]
+        aF_max = np.nanmax(aF_plot_1kpc)
+        aF_max_index = aF_plot.index(aF_max)
+        aF_max_R = radial_bins[aF_max_index]
+
+        print("Fourier moment", Fm, "- AMPLITUDE peak in [", -xlim, ":", xlim, "] kpc area is", round(aF_max,2), "at radius", round(aF_max_R,1), "kpc.")
+
+        aF_plot_comb.append(aF_plot)
+        phiF_plot_comb.append(phiF_plot)
+
+        aF_max_comb.append(aF_max)
+        aF_max_R_comb.append(aF_max_R)
+
+    if verbose_log:
+            # Debug output
+            print()
+            print("Start of berbose log")
+            print()
+            print("Size of AMPLITUDE combined array", len(aF_plot_comb))
+            print()
+            print("End of berbose log")
+            print()
+
+    #aF_plot.append(aF_plot_comb)
+    #phiF_plot.append(phiF_plot_comb)
+    #radial_bins.append(radial_bins)
+    #aF_max.append(aF_max_comb)
+    #aF_max_R.append(aF_max_R_comb)
+
+    if verbose_log:
+        # Debug output
+        print()
+        print("Start of berbose log")
+        print()
+        print("Size of AMPLITUDE array for all age groups", len(aF_plot))
+        print()
+        print("End of berbose log")
+        print()
+
+    # Plot the combined amplitude diagram for Fm 4 and 6
+    xlab = r'$R \rm \enspace [kpc]$'
+    ylab = r'$A(R)_Fm=4 $'
+    y2lab = r'$A(R)_Fm=6 $'
+    
+    ax = axes
+    ax2 = axes.twinx()
+    fs = 8
+
+        # Unpack values for plotting from arrays
+        #radial_bins = radial_bins[i]
+        #aF_plot_comb = aF_plot[i]
+    aF_plot_4 = aF_plot_comb[0]
+    aF_plot_6 = aF_plot_comb[1]
+
+        #aF_max_R_comb = aF_max_R[i]
+    X_ends_R_aF4 = aF_max_R_comb[0]
+    X_ends_R_aF6 = aF_max_R_comb[1]
+
+    ax.plot(radial_bins, aF_plot_4, c='r', label='r$A(R)$ Fm=4')
+    ax2.plot(radial_bins, aF_plot_6, c='b', label='r$A(R)$ Fm=6')
+    ax.tick_params(axis='both', which='both', labelsize=fs)
+    ax2.tick_params(axis='both', which='both', labelsize=fs)
+    ax.set_xlabel(xlab, fontsize=fs)
+    ax.set_ylabel(ylab, fontsize=fs, c='r')
+    ax2.set_ylabel(y2lab, fontsize=fs, c='b')
+    # We do not plot the analysis conditions for bars from Stuart code for sigma right now.
+    ax.axvline(X_ends_R_aF4, c='r', ls='-')
+    ax.axvline(X_ends_R_aF6, c='b', ls='--')
+    ax.set_xlim(0., xlim)
+
+    #divider = make_axes_locatable(axes[i])
+    #cax = divider.append_axes('right', size='5%', pad=0.05)
+
+    fig.tight_layout()
+    fig.suptitle(snap.replace(".gz","") + " sigma amplitude, Fourier moments 4 and 6.", fontsize=fs)
+    #plt.setp(axes[:], xlabel = 'x [kpc]')
+    #plt.setp(axes[0], ylabel = 'y [kpc]')
+
+    if save_file:
+        image_name = image_dir + snap.replace(".gz","") + '_sigma_amp_comb_' + str(xlim) + 'kpc' + '.png'
+        plt.savefig(image_name)
+        print("Image saved to",image_name)
+    else:
+        print("Image saving is turned off.")
+    if show_plot:
+        plt.show()
+    else:
+        print("On-screen ploting is turned off.")
+
+    del aF_plot
+    del phiF_plot
+
+    return fig, aF_max_comb, max_age
 
 
 def plot_sigma_amp_bar_ellip_timeline(model,aF_peaks,e_list,snap_ages,plot_bar_ellipticity,plot_sigma_amp,image_dir,save_file=True,show_plot=True,verbose_log=False):
@@ -1474,3 +1929,39 @@ def plot_density_hist2d(x,y): # Learned from Stuart Andersson
     plt.show()
 
     return None
+
+
+# Create PDF
+def save_to_pdf(output_pdf, square_figures, long_figures):
+    with PdfPages(output_pdf) as pdf:
+        # Create a master A4 figure
+        master_fig = plt.figure(figsize=(8.27, 11.69))  # A4 size in inches
+
+        # Define positions for the plots
+        positions = [
+            (0.05, 0.75, 0.4, 0.2),  # Square 1
+            (0.55, 0.75, 0.4, 0.2),  # Square 2
+            (0.05, 0.60, 0.9, 0.15), # Long 1
+            (0.05, 0.45, 0.9, 0.15), # Long 2
+            (0.05, 0.30, 0.9, 0.15), # Long 3
+            (0.05, 0.15, 0.9, 0.15), # Long 4
+            (0.05, 0.00, 0.9, 0.15), # Long 5
+        ]
+
+        # Embed square plots
+        for pos, fig in zip(positions[:2], square_figures):
+            bbox = Bbox.from_bounds(
+                pos[0] * 8.27, pos[1] * 11.69, pos[2] * 8.27, pos[3] * 11.69
+            )
+            master_fig.figimage(fig.canvas.buffer_rgba(), bbox=bbox)
+
+        # Embed long plots
+        for pos, fig in zip(positions[2:], long_figures):
+            bbox = Bbox.from_bounds(
+                pos[0] * 8.27, pos[1] * 11.69, pos[2] * 8.27, pos[3] * 11.69
+            )
+            master_fig.figimage(fig.canvas.buffer_rgba(), bbox=bbox)
+
+        # Save the master figure as a single PDF page
+        pdf.savefig(master_fig)
+        plt.close(master_fig)
