@@ -593,6 +593,11 @@ def ellipticity_from_moments(density, xlim, bins):
     x_mean = np.average(x_flat, weights=density_flat)
     y_mean = np.average(y_flat, weights=density_flat)
 
+    # === DIAGNOSTIC: print COM shift ===
+    if verbose_log:
+        com_shift = np.sqrt(x_mean**2 + y_mean**2)
+        print(f"[DIAG] COM shift: x = {x_mean:.2f} kpc, y = {y_mean:.2f} kpc, |COM| = {com_shift:.2f} kpc")
+
     x_dev = x_flat - x_mean
     y_dev = y_flat - y_mean
 
@@ -714,6 +719,145 @@ def bar_ellipticity_by_age(sim,xlim,ylim,bins,snap,image_dir,save_file=True,show
     return e_age_grp
 
 
+from scipy.interpolate import interp1d
+
+def ellipticity_from_ellipse_fit_interp2(density, unit, r_max=None, bins=None):
+    """
+    Calculate bar ellipticity from ellipse fitting and interpolate onto fixed radial grid.
+
+    Parameters:
+        density (2D array): 2D number density map.
+        unit (float): Size of one bin in physical units (e.g., kpc).
+        r_max (float): Max radius for interpolation (e.g., xlim). Defaults to half image width.
+        bins (int): Number of bins in density map (optional, used if r_max is not given).
+        verbose (bool): Print diagnostics.
+    
+    Returns:
+        r_interp (list): Radii in physical units [kpc].
+        e_interp (list): Interpolated ellipticities.
+    """
+    from photutils.isophote import EllipseGeometry, Ellipse
+    from scipy.interpolate import interp1d
+
+    ny, nx = density.shape
+    x0 = nx // 2
+    y0 = ny // 2
+
+    geometry = EllipseGeometry(x0, y0, sma=5, eps=0.2, pa=0)
+    ellipse = Ellipse(density, geometry)
+
+    isolist = ellipse.fit_image()
+
+    if verbose_log:
+        print(f"[DIAG] Ellipse fitting returned {len(isolist)} successful isophotes")
+
+    # Extract radii and ellipticities from isophotes
+    sma_list = np.array([iso.sma for iso in isolist])  # in pixels
+    e_list = np.array([1 - iso.eps for iso in isolist])  # eps = 1 - b/a => ellipticity = eps
+    r_list = sma_list * unit  # Convert to kpc
+
+    # Return early if no usable data
+    if len(r_list) == 0 or len(e_list) == 0:
+        print("[WARNING] Ellipse fitting returned empty arrays.")
+        return [], []
+
+    # Set interpolation radius range
+    if r_max is None:
+        r_max = r_list[-1]
+    elif bins is not None:
+        r_max = min(r_max, bins * unit / 2)
+
+    # Define fixed radial spacing (like in my other methods)
+    r_interp = np.arange(unit, r_max + unit, unit)
+
+    # Interpolate ellipticity using linear interpolation
+    interp_func = interp1d(r_list, e_list, kind='linear', bounds_error=False, fill_value="extrapolate")
+    e_interp = interp_func(r_interp)
+
+    return r_interp.tolist(), e_interp.tolist()
+
+
+def ellipticity_from_ellipse_fit_interp(density, unit, r_max=None, bins=None):
+    """
+    Calculate bar ellipticity from ellipse fitting and interpolate onto fixed radial grid.
+
+    Parameters:
+        density (2D array): 2D number density map.
+        unit (float): Size of one bin in physical units (e.g., kpc).
+        r_max (float): Max radius for interpolation (e.g., xlim).
+        bins (int): Number of bins in density map (used if r_max not given).
+
+    Returns:
+        r_interp (list): Radii in physical units [kpc].
+        e_interp (list): Interpolated ellipticities.
+    """
+    from photutils.isophote import EllipseGeometry, Ellipse
+    from scipy.interpolate import interp1d
+    import numpy as np
+
+    ny, nx = density.shape
+    x0 = nx // 2
+    y0 = ny // 2
+
+    geometry = EllipseGeometry(x0, y0, sma=1, eps=0.2, pa=0)
+    ellipse = Ellipse(density, geometry)
+    isolist_raw = ellipse.fit_image()
+
+    # Filter only valid isophotes
+    isolist = [iso for iso in isolist_raw if iso.valid]
+
+    if verbose_log:
+        print(f"[DIAG] Ellipse fitting returned {len(isolist)} valid isophotes")
+
+    # Return early if no usable data
+    if len(isolist) < 2:
+        print("[WARNING] Not enough valid isophotes for interpolation.")
+        return [], []
+
+    # Extract radius and ellipticity
+    sma_list = np.array([iso.sma for iso in isolist])         # in pixels
+    e_list = np.array([1 - iso.eps for iso in isolist])       # eps = 1 - b/a
+    r_list = sma_list * unit                                  # convert to kpc
+
+    # Set interpolation radius range
+    if r_max is None:
+        r_max = r_list[-1]
+    elif bins is not None:
+        r_max = min(r_max, bins * unit / 2)
+
+    r_interp = np.arange(unit, r_max + unit, unit)
+
+    # Interpolate ellipticity using linear interpolation
+    interp_func = interp1d(r_list, e_list, kind='linear', bounds_error=False, fill_value="extrapolate")
+    e_interp = interp_func(r_interp)
+    
+    if verbose_log:
+        print(f"[DIAG] First 5 interpolated e: {e_interp[:5]}")
+
+    return r_interp.tolist(), e_interp.tolist()
+
+
+
+
+from photutils.isophote import Ellipse, EllipseGeometry
+
+def ellipticity_from_ellipse_fit(density, unit):
+    center = density.shape[0] // 2
+    geometry = EllipseGeometry(x0=center, y0=center, sma=5, eps=0.1, pa=0)
+    ellipse = Ellipse(density, geometry)  # ← pass raw array directly
+    isolist = ellipse.fit_image()
+
+    if isolist is None or len(isolist) == 0:
+        if verbose_log:
+            print("Isolist is None!")
+        return [], []
+
+    radii = [iso.sma * unit for iso in isolist]
+    ellipticities = [iso.eps for iso in isolist]
+
+    return radii, ellipticities
+
+
 # Plots bar eööipticity using grouping switch
 def bar_ellipticity_by_age_grp_sw(sim,snap,image_dir,save_file=True):
 
@@ -736,10 +880,12 @@ def bar_ellipticity_by_age_grp_sw(sim,snap,image_dir,save_file=True):
     age_grp = 0
 
     # List of ellipticities and radii per age group for plotting
-    e_list = [[],[],[]]
     e1_list = [[],[],[]]
-    r_list = [[],[],[]]
+    e2_list = [[],[],[]]
     r1_list = [[],[],[]]
+    r2_list = [[],[],[]]
+    e3_list = [[],[],[]]
+    r3_list = [[],[],[]]
     e_age_grp = []
 
     # Call the grouping function 
@@ -747,6 +893,7 @@ def bar_ellipticity_by_age_grp_sw(sim,snap,image_dir,save_file=True):
 
     for grp in groups:
         age_grp += 1
+        i = age_grp - 1
         if verbose_log:
             print_ages(grp,"group")
 
@@ -763,48 +910,54 @@ def bar_ellipticity_by_age_grp_sw(sim,snap,image_dir,save_file=True):
         if verbose_log:
             print("Unit in kpc:", round(unit,2))
 
-        e = ellipticity(unit,bins,dfg_stat2d)
-        e1 = ellipticity_from_moments(dfg_stat2d, xlim, bins)
-        print('*** Age group', age_grp, 'ellipticity:', e)
-        print('*** Age group', age_grp, 'ellipticity using monments:', e1)
-        e_age_grp.append(e1)
+        e1 = ellipticity(unit,bins,dfg_stat2d)
+        e2 = ellipticity_from_moments(dfg_stat2d, xlim, bins)
 
-        if verbose_log:
-            for radius in range(1,int(bins/2)+1):
-                sub_list = extract_sublist(dfg_stat2d, radius)
-                e = ellipticity(unit,2*radius,sub_list)
-                e_list[age_grp-1].append(e)
-                r_list[age_grp-1].append(round(radius*unit,2))
+        # Ellipse fitting
+        #r3, e3 = ellipticity_from_ellipse_fit(dfg_stat2d, unit)
+        r3, e3 = ellipticity_from_ellipse_fit_interp(dfg_stat2d, unit, xlim, bins)
+        if r3 and e3:
+            r3_list[i] = r3
+            e3_list[i] = e3
+            print('*** Age group', age_grp, 'max ellipticity using fitting:', max(e3))
+        else:
+            print(f"[WARNING] Skipping ellipse fitting plot for age group {age_grp}")
 
-                subset = extract_subset(dfg_stat2d, radius)
-                subset_bins = subset.shape[0]
-                subset_xlim = unit * radius
+        print('*** Age group', age_grp, 'ellipticity:', e1)
+        print('*** Age group', age_grp, 'ellipticity using monments:', e2)
+        if(e3): print('*** Age group', age_grp, 'max ellipticity using fitting:', max(e3))
+        # Pick the ellipticity method for the rest of calculations
+        e_age_grp.append(e2)
 
-                e1 = ellipticity_from_moments(subset, subset_xlim, subset_bins)
-                e1_list[age_grp-1].append(e1)
-                r1_list[age_grp-1].append(round(subset_xlim,2))
-                                
-                if verbose_log:
-                    print('*** Radius:', round(radius*unit,2), " kpc, ", 'ellipticity:', e)
-                    print('*** Radius:', round(subset_xlim,2), " kpc, ", 'ellipticity from moments:', e1)
+        for radius in range(1,int(bins/2)+1):
+            sub_list = extract_sublist(dfg_stat2d, radius)
+            e1 = ellipticity(unit,2*radius,sub_list)
+            e1_list[i].append(e1)
+            r1_list[i].append(round(radius*unit,2))
 
-        i = age_grp - 1
-        image = axes[i].plot(r_list[i],e_list[i], color = "blue", label="Quadropole method")
-        image = axes[i].plot(r1_list[i],e1_list[i], color = "red", label="Inertia tensor method")
+            subset = extract_subset(dfg_stat2d, radius)
+            subset_bins = subset.shape[0]
+            subset_xlim = unit * radius
+
+            e2 = ellipticity_from_moments(subset, subset_xlim, subset_bins)
+            e2_list[i].append(e2)
+            r2_list[i].append(round(subset_xlim,2))
+                
+            if verbose_log:
+                print('*** Radius:', round(radius*unit,2), " kpc, ", 'ellipticity:', e1)
+                print('*** Radius:', round(subset_xlim,2), " kpc, ", 'ellipticity from moments:', e2)
+                print('*** Radius:', round(subset_xlim,2), " kpc, ", 'ellipticity from fitting:', e3)
+
+        
+        image = axes[i].plot(r1_list[i],e1_list[i], color = "blue", label="Quadrupole method")
+        image = axes[i].plot(r2_list[i],e2_list[i], color = "red", label="Inertia tensor method")
+        axes[i].plot(r3_list[i], e3_list[i], color="green", label="Ellipse fitting method")
         axes[i].legend()
         axes[i].title.set_text("Age group " + str(i+1))
-        # axes[i].set_ylim(min(e_list[age_grp-1]), max(e_list[age_grp-1]))
 
-        #divider = make_axes_locatable(axes[i])
-        #cax = divider.append_axes('right', size='5%', pad=0.05)
-        #if i > 0:
-        #    axes[i].set_yticklabels([])
-
-    #fig.tight_layout()
-    #fig.tight_layout(rect=[0, 0, 1, 0.95])
     # Add legend to whole figure
-    handles, labels = axes[0].get_legend_handles_labels()
-    fig.legend(handles, labels, loc='lower center', ncol=2, frameon=False)
+    #handles, labels = axes[0].get_legend_handles_labels()
+    #fig.legend(handles, labels, loc='lower center', ncol=2, frameon=False)
 
     # Layout tweaks
     fig.tight_layout(rect=[0, 0.05, 1, 0.95])
@@ -828,7 +981,7 @@ def bar_ellipticity_by_age_grp_sw(sim,snap,image_dir,save_file=True):
 
 
 # Plots bar length estimation using amplitude and phase of Fourier moment 2
-def bar_length(sim,bin_width,xlim,snap,image_dir,save_file=True,show_plot=True,verbose_log=False):
+def bar_length(sim,bin_width,xlim,snap,image_dir,save_file=True):
     #Extract phase space data for the model
     x, y, m = sim.s['x'], sim.s['y'], sim.s['mass']
 
@@ -925,7 +1078,11 @@ def bar_length(sim,bin_width,xlim,snap,image_dir,save_file=True,show_plot=True,v
 # Plots bar length estimation for age group using amplitude and phase of Fourier moment 2
 def bar_length_Fm(sim,Fm,snap,image_dir,age_grp=0,save_file=True):
     
-    xlim = xlim + 0.5
+    if verbose_log:
+        # Debug output
+        print("Snapshot xlim from the parameter file:", xlim)
+
+    bar_xlim = xlim + 0.5
 
     #Extract phase space data for the model
     x, y, m = sim.s['x'], sim.s['y'], sim.s['mass']
@@ -1026,7 +1183,7 @@ def bar_length_Fm(sim,Fm,snap,image_dir,age_grp=0,save_file=True):
     # We do not plot the analysis conditions for bars from Stuart code for sigma right now.
     ax.axvline(bar_ends_R_aF, c='r', ls='--')
     ax.axvline(bar_ends_R_phiF, c='b', ls='--')
-    ax.set_xlim(0., xlim)
+    ax.set_xlim(0., bar_xlim)
 
     title = snap.replace(".gz","") + "Amp-Phase Fm " + str(Fm)
     if age_grp != 0:
@@ -1097,7 +1254,7 @@ def bar_length_by_age_grp_sw_Fm(sim,Fm,snap,image_dir,save_file=True):
     # Check if min age is not equal to max age    
     check_ages(sim)
             
-    # Number density statistics per age group
+    # Bar amplitude per age group
     age_grp = 0
 
     # Call the grouping function 
@@ -1108,7 +1265,7 @@ def bar_length_by_age_grp_sw_Fm(sim,Fm,snap,image_dir,save_file=True):
         if verbose_log:
             print_ages(grp,"group")
     
-        bar_length_Fm(grp,bin_width,xlim+0.5,Fm,snap,image_dir,age_grp,save_file,show_plot,verbose_log)
+        bar_length_Fm(grp,Fm,snap,image_dir,age_grp,save_file)
 
     return None
 
@@ -1621,10 +1778,101 @@ def plot_sigma_by_age_grp_sw_umask(cmap,sim,blur,snap,image_dir,save_file=True):
     return fig
 
 
+# Plots edge-on sigma for age groups using grouping switch and unsharp mask (NaN-safe version)
+# With fixed issued for color bar.
+def plot_sigma_by_age_grp_sw_umask2(cmap, sim, blur, snap, image_dir, save_file=True):
+    stat2d_lst = []
+
+    # Divide snapshot into 3 age groups
+    if verbose_log:
+        print_ages(sim, "snapshot")
+
+    # Check if min age is not equal to max age    
+    check_ages(sim)
+
+    # Call the grouping function 
+    groups = grouping(sim)
+
+    for grp in groups:
+        #Extract phase space data for the model for stars in the group
+        vz_, x_, y_ = grp.star['vz'], grp.star['x'], grp.star['y']
+
+        # Number density statistics face-on for stellar population by age group
+        vdg_stat2d, vdg_xedges, vdg_yedges, _ = st.binned_statistic_2d(
+            x_, y_, vz_,
+            statistic='std',
+            range=[[-xlim, xlim], [-ylim, ylim]],
+            bins=bins
+        )
+        stat2d_lst.append(vdg_stat2d.T)
+
+    # Setup for plotting
+    x_panels, y_panels = 3, 1
+    figsize_x, figsize_y = 3 * x_panels, 3.5 * y_panels
+    fig, axes = plt.subplots(y_panels, x_panels, figsize=(figsize_x, figsize_y))
+
+    # Compute global min and max across all age groups
+    vmin = min(np.nanmin(d) for d in stat2d_lst)
+    vmax = max(np.nanmax(d) for d in stat2d_lst)
+
+    for i in range(x_panels):
+        data = stat2d_lst[i]
+        data_filled = np.nan_to_num(data, nan=np.nanmedian(data))  # Fill NaNs with median
+        blurred = gf(data_filled, sigma=blur)
+        sharpened = data_filled + (data_filled - blurred)  # Unsharp masking
+
+        image = axes[i].imshow(
+            sharpened,
+            origin='lower',
+            extent=[-xlim, xlim, -ylim, ylim],
+            cmap=cmap,
+            vmin=vmin,
+            vmax=vmax
+        )
+
+        xcent = (vdg_xedges[1:] + vdg_xedges[:-1]) / 2
+        ycent = (vdg_yedges[1:] + vdg_yedges[:-1]) / 2
+        axes[i].contour(xcent, ycent, data, linewidths=2, linestyles='dashed', colors='w')
+        axes[i].title.set_text("Age group " + str(i + 1))
+
+        # Add reference circles
+        axes[i].add_patch(plt.Circle((0, 0), 3, color='green', fill=False))
+        axes[i].add_patch(plt.Circle((0, 0), 4, color='green', fill=False))
+
+        if i > 0:
+            axes[i].set_yticklabels([])
+
+    # Add a shared colorbar after plotting all subplots
+    fig.tight_layout()
+    fig.subplots_adjust(right=0.85)
+    cbar_ax = fig.add_axes([0.88, 0.15, 0.02, 0.7])  # [left, bottom, width, height]
+    fig.colorbar(image, cax=cbar_ax)
+
+    suptit_name = snap.replace(".gz", "") + " LOS velocity dispersion " + grp_sw + f" (sharp {blur})."
+    fig.suptitle(suptit_name)
+    plt.setp(axes[:], xlabel='y [kpc]')
+    plt.setp(axes[0], ylabel='z [kpc]')
+
+    if save_file:
+        image_name = f"{image_dir}{snap.replace('.gz', '')}_sigma_by_age_3grp_{xlim}kpc_umask_b{blur}_{grp_sw}.png"
+        plt.savefig(image_name)
+        print("Image saved to", image_name)
+    else:
+        print("Image saving is turned off.")
+
+    if show_plot:
+        plt.show()
+    else:
+        print("On-screen plotting is turned off.")
+
+    del stat2d_lst
+    return fig
+
+
 # Plots sigma shape estimation using amplitude and phase of Fourier moments m 4 or 6
 def sigma_shape_Fm(sim,Fm,snap,image_dir,age_grp=0,save_file=True):
     
-    xlim = xlim + 0.5
+    bar_xlim = xlim + 0.5
     
     #Extract phase space data for the model
     x, y, z, vz = sim.s['x'], sim.s['y'], sim.s['z'], sim.s['vz']
@@ -1793,7 +2041,7 @@ def sigma_shape_Fm(sim,Fm,snap,image_dir,age_grp=0,save_file=True):
     # We do not plot the analysis conditions for bars from Stuart code for sigma right now.
     #ax.axvline(bar_ends_R_aF, c='r', ls='--')
     #ax.axvline(bar_ends_R_phiF, c='b', ls='--')
-    ax.set_xlim(0., xlim)
+    ax.set_xlim(0., bar_xlim)
     
     title = snap.replace(".gz","") + " Amp-Phase Fm " + str(Fm)
     if age_grp != 0:

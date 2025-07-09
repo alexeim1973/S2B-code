@@ -64,10 +64,6 @@ plot_LOS_sigma = True
 plot_LOS_sigma_per_ag = True
 #plot_LOS_sigma_per_ag = False
 
-# Plot bar end-on LOS sigma combined Fourier m 4 and 6 per age group
-#plot_LOS_sigma_per_ag_combined = True       
-#plot_LOS_sigma_per_ag_combined = False
-
 # Plot LOS sigma Ampplitude per Fourier moment per age group
 plot_sigma_amp_per_ag_single = True 
 plot_sigma_amp_per_ag_single = False
@@ -79,6 +75,11 @@ plot_sigma_amp_combined = False
 # Plot LOS sigma Amplitude with combined Fourier moment 4 and 6 per age group
 plot_sigma_amp_per_ag_combined = True 
 plot_sigma_amp_per_ag_combined = False
+
+"""
+!!! The following timeline based parameters only make sense for a galaxy model with many snapshots.
+Do not use them for TNG colections with a single snapshot pr galaxy.
+"""
 
 # Plot LOS sigma Amplitude and bar ellipticity timeline with combined Fourier moment 4 and 6 per age group
 plot_sigma_amp_bar_ellip_timeline_per_ag = True
