@@ -1,4 +1,4 @@
-# import scipy
+# import modules
 from scipy import stats as st
 import pynbody as pb
 from datetime import datetime
@@ -15,6 +15,7 @@ from scipy.signal import find_peaks as find_peaks
 import os
 import numpy as np
 import matplotlib.pyplot as plt
+from photutils.isophote import Ellipse, EllipseGeometry
 
 from Fourier_params import *
 
@@ -77,7 +78,7 @@ def bar_align(galaxy, nuclear = False, log = False):
     """
 
     if log:
-            print('* Aligning the data...')
+            print('* Aligning the snapshot...')
 
     if nuclear:
             # rbar = 1, barfrac = 0.5, zlim = 0.5 - zooming in to the central area 1 by 1 kpc
@@ -139,7 +140,7 @@ def bar_align(galaxy, nuclear = False, log = False):
     return None
 
 
-# Loads snapshot in the memory using Pynbody
+# Loads snapshot in memory using Pynbody
 def pbload(filename,  paramname=None, nuclear=False, align=False, log=False):
     
     if verbose_log:
@@ -161,16 +162,21 @@ def pbload(filename,  paramname=None, nuclear=False, align=False, log=False):
     else:
         sim = pb.load(filename, paramname=paramname)
 
-    # Centering the data
-    if log:
-        print('* Centering the data...')
+    sim.physical_units()
 
-    #Centre the stars using a hybrid method - potential minimum and shrinking sphere
-    pb.analysis.halo.center(sim.s, mode='hyb')
+    if log:
+        print('* Rotating the snapshot face on...')
     
     #Rotate the simulation so that we see the stars face on
     pb.analysis.angmom.faceon(sim.s)
 
+    # Centering the snapshot
+    if log:
+        print('* Centering the snapshot...')
+
+    #Centre the stars using a hybrid method - potential minimum and shrinking sphere
+    pb.analysis.halo.center(sim.s, mode='pot')
+    
     # Aligning the data
     if align:
         bar_align(sim, nuclear, log)
@@ -304,7 +310,7 @@ def plot_density(cmap,sim,snap,image_dir,save_file=True):
         unit = 2*xlim/bins
         if verbose_log:
             print("Unit in kpc:", round(unit,2))
-        e = ellipticity(unit,bins,df_stat2d)
+        e = ellipticity_quadrupole(unit,bins,df_stat2d)
         e1 = ellipticity_from_moments(df_stat2d, xlim, bins)
         print('*** Ellipticity:', e)
         print('*** Ellipticity using moments:', e1)
@@ -548,29 +554,21 @@ def plot_density_by_age_grp_sw(cmap,sim,pos,snap,image_dir,e_list=False,save_fil
     return fig
 
 
-# This function calculates a bar ellipticity
-def ellipticity(unit,bins,list):
+# This function calculates a bar ellipticity using quadrupole method
+def ellipticity_quadrupole(unit,bins,stats):
     q_x = 0
     q_y = 0
 
     for R in range (1, int(bins/2)+1):
-        #print("Radius:", R)
 
-        sub_list = extract_sublist(list, R)
-        #print(sub_list)
-        #for e in sub_list:
-        #    print(e)
+        sub_stats = extract_sublist(stats, R)
 
-        row_sums, col_sums = sum_columns_and_rows(sub_list)
-        #print("Row sums:", row_sums)
-        #print("Column sums:", col_sums)
+        row_sums, col_sums = sum_columns_and_rows(sub_stats)
 
         r = unit*R
 
         q_y = q_y + row_sums[R]*(r**2)
         q_x = q_x + col_sums[R]*(r**2)
-        #print("Qx:", round(q_x,2))
-        #print("Qy:", round(q_y,2))
 
     e = 1 - sqrt(q_y / q_x)
 
@@ -618,7 +616,56 @@ def ellipticity_from_moments(density, xlim, bins):
     return round(ellipticity, 2)
 
 
-# Plots bar eööipticity
+# This function calculates a bar ellipticity using ellipse fit method
+def ellipticity_from_ellipse_fit(density, unit):
+    center = density.shape[0] // 2
+    geometry = EllipseGeometry(x0=center, y0=center, sma=5, eps=0.1, pa=0)
+    ellipse = Ellipse(density, geometry)  # ← pass raw array directly
+    isolist = ellipse.fit_image()
+
+    if isolist is None or len(isolist) == 0:
+        if verbose_log:
+            print("Isolist is None!")
+        return [], []
+
+    radii = [iso.sma * unit for iso in isolist]
+    ellipticities = [iso.eps for iso in isolist]
+
+    return radii, ellipticities
+
+
+# This function calculates a bar ellipticity using ellipse fit method
+def fit_ellipses_to_density(density, bins, num_ellipses, verbose=True):
+
+    #xs, ys = get_density_peak_center(density)
+    #xs, ys = 11, 11
+
+    ys, xs = np.unravel_index(np.argmax(density), density.shape)
+    if verbose:
+        print("Density peak center is:", xs, ys)
+
+    sma = bins / 4
+    eps = 0.2
+    pa = 1. / 180. * np.pi
+
+    g = EllipseGeometry(xs, ys, sma, eps, pa)
+    g.fix_center = True
+    ellipse = Ellipse(density, geometry=g)
+    estep = bins / (num_ellipses - 1) / 2
+    isolist = ellipse.fit_image(step=estep, maxsma=0.95*bins/2, linear=True, maxgerr=2)
+
+    if verbose:
+        center_pix = (density.shape[1] // 2, density.shape[0] // 2)
+        print("Density array center (x, y):", center_pix)
+        t = isolist.to_table()
+        print(t.colnames)
+        print("Isophotes center, ellipticity, semi-major axis, position angle")
+        print(t['x0', 'y0', 'ellipticity', 'sma', 'pa'][:20])  # First few isophotes
+
+    return isolist
+
+
+# Plots bar ellipticity
 def bar_ellipticity_by_age(sim,xlim,ylim,bins,snap,image_dir,save_file=True,show_plot=True,verbose_log=True):
 
     # Divide snapshot into 3 age groups
@@ -667,14 +714,14 @@ def bar_ellipticity_by_age(sim,xlim,ylim,bins,snap,image_dir,save_file=True,show
         if verbose_log:
             print("Unit in kpc:", round(unit,2))
 
-        e = ellipticity(unit,bins,dfg_stat2d)
+        e = ellipticity_quadrupole(unit,bins,dfg_stat2d)
         print('*** Age group', age_grp, 'ellipticity:', e)
         e_age_grp.append(e)
 
         if verbose_log:
             for radius in range(1,int(bins/2)+1):
                 sub_list = extract_sublist(dfg_stat2d, radius)
-                e = ellipticity(unit,2*radius,sub_list)
+                e = ellipticity_quadrupole(unit,2*radius,sub_list)
                 e_list[age_grp-1].append(e)
                 r_list[age_grp-1].append(round(radius*unit,2))
                 if verbose_log:
@@ -719,152 +766,13 @@ def bar_ellipticity_by_age(sim,xlim,ylim,bins,snap,image_dir,save_file=True,show
     return e_age_grp
 
 
-from scipy.interpolate import interp1d
-
-def ellipticity_from_ellipse_fit_interp2(density, unit, r_max=None, bins=None):
-    """
-    Calculate bar ellipticity from ellipse fitting and interpolate onto fixed radial grid.
-
-    Parameters:
-        density (2D array): 2D number density map.
-        unit (float): Size of one bin in physical units (e.g., kpc).
-        r_max (float): Max radius for interpolation (e.g., xlim). Defaults to half image width.
-        bins (int): Number of bins in density map (optional, used if r_max is not given).
-        verbose (bool): Print diagnostics.
-    
-    Returns:
-        r_interp (list): Radii in physical units [kpc].
-        e_interp (list): Interpolated ellipticities.
-    """
-    from photutils.isophote import EllipseGeometry, Ellipse
-    from scipy.interpolate import interp1d
-
-    ny, nx = density.shape
-    x0 = nx // 2
-    y0 = ny // 2
-
-    geometry = EllipseGeometry(x0, y0, sma=5, eps=0.2, pa=0)
-    ellipse = Ellipse(density, geometry)
-
-    isolist = ellipse.fit_image()
-
-    if verbose_log:
-        print(f"[DIAG] Ellipse fitting returned {len(isolist)} successful isophotes")
-
-    # Extract radii and ellipticities from isophotes
-    sma_list = np.array([iso.sma for iso in isolist])  # in pixels
-    e_list = np.array([1 - iso.eps for iso in isolist])  # eps = 1 - b/a => ellipticity = eps
-    r_list = sma_list * unit  # Convert to kpc
-
-    # Return early if no usable data
-    if len(r_list) == 0 or len(e_list) == 0:
-        print("[WARNING] Ellipse fitting returned empty arrays.")
-        return [], []
-
-    # Set interpolation radius range
-    if r_max is None:
-        r_max = r_list[-1]
-    elif bins is not None:
-        r_max = min(r_max, bins * unit / 2)
-
-    # Define fixed radial spacing (like in my other methods)
-    r_interp = np.arange(unit, r_max + unit, unit)
-
-    # Interpolate ellipticity using linear interpolation
-    interp_func = interp1d(r_list, e_list, kind='linear', bounds_error=False, fill_value="extrapolate")
-    e_interp = interp_func(r_interp)
-
-    return r_interp.tolist(), e_interp.tolist()
-
-
-def ellipticity_from_ellipse_fit_interp(density, unit, r_max=None, bins=None):
-    """
-    Calculate bar ellipticity from ellipse fitting and interpolate onto fixed radial grid.
-
-    Parameters:
-        density (2D array): 2D number density map.
-        unit (float): Size of one bin in physical units (e.g., kpc).
-        r_max (float): Max radius for interpolation (e.g., xlim).
-        bins (int): Number of bins in density map (used if r_max not given).
-
-    Returns:
-        r_interp (list): Radii in physical units [kpc].
-        e_interp (list): Interpolated ellipticities.
-    """
-    from photutils.isophote import EllipseGeometry, Ellipse
-    from scipy.interpolate import interp1d
-    import numpy as np
-
-    ny, nx = density.shape
-    x0 = nx // 2
-    y0 = ny // 2
-
-    geometry = EllipseGeometry(x0, y0, sma=1, eps=0.2, pa=0)
-    ellipse = Ellipse(density, geometry)
-    isolist_raw = ellipse.fit_image()
-
-    # Filter only valid isophotes
-    isolist = [iso for iso in isolist_raw if iso.valid]
-
-    if verbose_log:
-        print(f"[DIAG] Ellipse fitting returned {len(isolist)} valid isophotes")
-
-    # Return early if no usable data
-    if len(isolist) < 2:
-        print("[WARNING] Not enough valid isophotes for interpolation.")
-        return [], []
-
-    # Extract radius and ellipticity
-    sma_list = np.array([iso.sma for iso in isolist])         # in pixels
-    e_list = np.array([1 - iso.eps for iso in isolist])       # eps = 1 - b/a
-    r_list = sma_list * unit                                  # convert to kpc
-
-    # Set interpolation radius range
-    if r_max is None:
-        r_max = r_list[-1]
-    elif bins is not None:
-        r_max = min(r_max, bins * unit / 2)
-
-    r_interp = np.arange(unit, r_max + unit, unit)
-
-    # Interpolate ellipticity using linear interpolation
-    interp_func = interp1d(r_list, e_list, kind='linear', bounds_error=False, fill_value="extrapolate")
-    e_interp = interp_func(r_interp)
-    
-    if verbose_log:
-        print(f"[DIAG] First 5 interpolated e: {e_interp[:5]}")
-
-    return r_interp.tolist(), e_interp.tolist()
-
-
-
-
-from photutils.isophote import Ellipse, EllipseGeometry
-
-def ellipticity_from_ellipse_fit(density, unit):
-    center = density.shape[0] // 2
-    geometry = EllipseGeometry(x0=center, y0=center, sma=5, eps=0.1, pa=0)
-    ellipse = Ellipse(density, geometry)  # ← pass raw array directly
-    isolist = ellipse.fit_image()
-
-    if isolist is None or len(isolist) == 0:
-        if verbose_log:
-            print("Isolist is None!")
-        return [], []
-
-    radii = [iso.sma * unit for iso in isolist]
-    ellipticities = [iso.eps for iso in isolist]
-
-    return radii, ellipticities
-
-
-# Plots bar eööipticity using grouping switch
+# Plots bar ellipticity using grouping switch
 def bar_ellipticity_by_age_grp_sw(sim,snap,image_dir,save_file=True):
 
     x_panels = 3
     y_panels = 1
-    figsize_x = 3*x_panels      # inches
-    figsize_y = 3.5*y_panels    # inches
+    figsize_x = 4*x_panels      # inches
+    figsize_y = 4*y_panels    # inches
 
     # Make the figure and sub plots
     fig,axes = plt.subplots(y_panels,x_panels,figsize=(figsize_x,figsize_y))
@@ -907,31 +815,47 @@ def bar_ellipticity_by_age_grp_sw(sim,snap,image_dir,save_file=True):
                                     bins = bins)
 
         unit = 2*xlim/bins
+
         if verbose_log:
             print("Unit in kpc:", round(unit,2))
 
-        e1 = ellipticity(unit,bins,dfg_stat2d)
+        e1 = ellipticity_quadrupole(unit,bins,dfg_stat2d)
         e2 = ellipticity_from_moments(dfg_stat2d, xlim, bins)
 
-        # Ellipse fitting
-        #r3, e3 = ellipticity_from_ellipse_fit(dfg_stat2d, unit)
-        r3, e3 = ellipticity_from_ellipse_fit_interp(dfg_stat2d, unit, xlim, bins)
-        if r3 and e3:
-            r3_list[i] = r3
-            e3_list[i] = e3
-            print('*** Age group', age_grp, 'max ellipticity using fitting:', max(e3))
+        isolist = fit_ellipses_to_density(dfg_stat2d.T, bins, num_ellipses, verbose=True)
+        t = isolist.to_table()
+        smas = t['sma']
+        epsilons = t['ellipticity']
+        smas_kpc = smas * (2 * xlim / bins)
+        #pas_deg = t['pa']
+        if smas_kpc.any() and epsilons.any():
+            r3_list[i] = smas_kpc
+            e3_list[i] = epsilons
+            # --- Find all local maxima ---
+            peaks, _ = find_peaks(epsilons)
+            # Find the second peak or report if less than 2 peaks is found
+            if len(peaks) < 2:
+                print("[WARNING] Fewer than two peaks found in ellipticity fitting.")
+                peak_idx = peaks[0] if len(peaks) > 0 else None
+                print('*** Age group', age_grp, 'peak of ellipticity using fitting:', epsilons[peak_idx])
+            else:
+                # Sort peaks by sma (i.e., radial order) and ignore the first (inner peak)
+                peaks_sorted_by_sma = sorted(peaks, key=lambda i: smas[i])
+                second_peak_idx = peaks_sorted_by_sma[1]
+                print('*** Age group', age_grp, 'second peak of ellipticity using fitting:', epsilons[second_peak_idx])
         else:
             print(f"[WARNING] Skipping ellipse fitting plot for age group {age_grp}")
 
-        print('*** Age group', age_grp, 'ellipticity:', e1)
-        print('*** Age group', age_grp, 'ellipticity using monments:', e2)
-        if(e3): print('*** Age group', age_grp, 'max ellipticity using fitting:', max(e3))
+        #print('*** Age group', age_grp, 'ellipticity:', e1)
+        #print('*** Age group', age_grp, 'ellipticity using monments:', e2)
+        #if(epsilons.any()): print('*** Age group', age_grp, 'second peak of ellipticity using fitting:', epsilons[second_peak_idx])
+        
         # Pick the ellipticity method for the rest of calculations
         e_age_grp.append(e2)
 
         for radius in range(1,int(bins/2)+1):
             sub_list = extract_sublist(dfg_stat2d, radius)
-            e1 = ellipticity(unit,2*radius,sub_list)
+            e1 = ellipticity_quadrupole(unit,2*radius,sub_list)
             e1_list[i].append(e1)
             r1_list[i].append(round(radius*unit,2))
 
@@ -946,23 +870,34 @@ def bar_ellipticity_by_age_grp_sw(sim,snap,image_dir,save_file=True):
             if verbose_log:
                 print('*** Radius:', round(radius*unit,2), " kpc, ", 'ellipticity:', e1)
                 print('*** Radius:', round(subset_xlim,2), " kpc, ", 'ellipticity from moments:', e2)
-                print('*** Radius:', round(subset_xlim,2), " kpc, ", 'ellipticity from fitting:', e3)
 
-        
-        image = axes[i].plot(r1_list[i],e1_list[i], color = "blue", label="Quadrupole method")
-        image = axes[i].plot(r2_list[i],e2_list[i], color = "red", label="Inertia tensor method")
-        axes[i].plot(r3_list[i], e3_list[i], color="green", label="Ellipse fitting method")
-        axes[i].legend()
+        axes[i].plot(r1_list[i],e1_list[i], color = "blue", label = "Quadrupole method")
+        axes[i].plot(r2_list[i],e2_list[i], color = "red", label = "Inertia tensor method")
+        for e in range (len(r3_list[i])):
+            r3_list[i][e] += r1_list[i][0]                 
+        axes[i].plot(r3_list[i], e3_list[i], color = "green", label = "Ellipse fitting method")
         axes[i].title.set_text("Age group " + str(i+1))
+
+    if verbose_log:
+        print("Ellipticity from quadrupole elements:", len(e1_list[1]))
+        print("Ellipticity from moments elements:", len(e2_list[1]))
+        print("Ellipticity from fitting elements:", len(e3_list[1]))
 
     # Add legend to whole figure
     #handles, labels = axes[0].get_legend_handles_labels()
     #fig.legend(handles, labels, loc='lower center', ncol=2, frameon=False)
 
+    # Add a single global legend outside the subplots
+    handles, labels = axes[0].get_legend_handles_labels()
+    fig.legend(handles, labels, loc='center right', fontsize='small', frameon=False)
+
+    # Adjust layout to make space for the legend
+    plt.tight_layout(rect=[0, 0, 0.85, 1])  # leave space on the right
+
     # Layout tweaks
-    fig.tight_layout(rect=[0, 0.05, 1, 0.95])
+    #fig.tight_layout(rect=[0, 0.05, 1, 0.95])
     suptit_name = snap.replace(".gz","") + " bar ellipticity per age group " + grp_sw 
-    fig.suptitle(suptit_name)            
+    fig.suptitle(suptit_name, fontsize=14, y=1.03)
     plt.setp(axes[:], xlabel = 'R [kpc]')
     plt.setp(axes[0], ylabel = 'e')
 
@@ -1650,7 +1585,7 @@ def plot_sigma_by_age_umask(cmap,sim,xlim,ylim,bins,blur,snap,image_dir,save_fil
                 ycent = (vdg_yedges[1:] + vdg_yedges[:-1]) / 2
                 axes[i].contour(xcent, ycent, stat2d_lst[i], linewidths = 2, linestyles = 'dashed', colors = 'w')
                 axes[i].title.set_text("Age group " + str(i+1))
-                # For nuclear bars teh circle R is 0.5 and 0.75 
+                # For nuclear bars the circle R is 0.5 and 0.75 
                 circle1 = plt.Circle((0, 0), 3, color='green', fill=False)
                 circle2 = plt.Circle((0, 0), 4, color='green', fill=False)
                 axes[i].add_patch(circle1)
@@ -2893,7 +2828,7 @@ def plot_density_hist2d(x,y): # Learned from Stuart Andersson
     return None
 
 
-# Create PDF
+# Create PDF - needs to be fixed
 import matplotlib.pyplot as plt
 from matplotlib.backends.backend_pdf import PdfPages
 

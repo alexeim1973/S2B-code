@@ -74,7 +74,7 @@ plot_sigma_amp_combined = False
 
 # Plot LOS sigma Amplitude with combined Fourier moment 4 and 6 per age group
 plot_sigma_amp_per_ag_combined = True 
-plot_sigma_amp_per_ag_combined = False
+#plot_sigma_amp_per_ag_combined = False
 
 """
 !!! The following timeline based parameters only make sense for a galaxy model with many snapshots.
@@ -122,7 +122,8 @@ else:
     bin_width = 0.2 # kpc - for Amp/Phase calculations
     bin_arc = 15 # degrees
 
-    bins = 20 # for 2D statistic calculations, both number density and sigma
+    bins = 30 # for 2D statistic calculations, both number density and sigma
+    num_ellipses = bins/2 # half teh number of bins to match the length of ellipticity arrays from different methods
     #xlim, ylim = 5., 5. # kpc - primary bar
     xlim, ylim = 7., 7. # kpc - primary bar plus a bit more
 
