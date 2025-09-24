@@ -1386,7 +1386,7 @@ def plot_sigma_by_age_grp_sw_umask2(cmap, sim, b_alpha, b_sigma, snap, image_dir
 
         #axes[i].title.set_text("Group " + str(i+1))
 
-        # Add reference circles
+        # Add reference circles at 3 and 4 kpc
         axes[i].add_patch(plt.Circle((0, 0), 3, color='green', fill=False))
         axes[i].add_patch(plt.Circle((0, 0), 4, color='green', fill=False))
 
@@ -1934,12 +1934,18 @@ def sigma_shape_by_age_grp_sw_combined_Fm(sim,sigmaFm,snap,image_dir,age_grp=0,s
         aF_plot_4 = aF_plot_comb[0]
         aF_plot_6 = aF_plot_comb[1]
 
+        phiF_plot_comb = phiF_plot_age_grp[i]
+        phiF_plot_4 = phiF_plot_comb[0]
+        phiF_plot_6 = phiF_plot_comb[1]
+
         aF_max_R_comb = aF_max_R_age_grp[i]
         X_ends_R_aF4 = aF_max_R_comb[0]
         X_ends_R_aF6 = aF_max_R_comb[1]
 
         ax.plot(radial_bins, aF_plot_4, c='r', label='r$A(R)$ Fm=4')
         ax2.plot(radial_bins, aF_plot_6, c='b', label='r$A(R)$ Fm=6')
+        #ax.plot(radial_bins, phiF_plot_4, c='g', label='r$Phi(R)$ Fm=4')
+        #ax2.plot(radial_bins, phiF_plot_6, c='c', label='r$Phi(R)$ Fm=6')
         ax.tick_params(axis='both', which='both', labelsize=fs)
         ax2.tick_params(axis='both', which='both', labelsize=fs)
         ax.set_xlabel(xlab, fontsize=fs)
@@ -1948,7 +1954,14 @@ def sigma_shape_by_age_grp_sw_combined_Fm(sim,sigmaFm,snap,image_dir,age_grp=0,s
         # We do not plot the analysis conditions for bars from Stuart code for sigma right now.
         ax.axvline(X_ends_R_aF4, c='r', ls='-')
         ax.axvline(X_ends_R_aF6, c='b', ls='--')
-        ax.set_xlim(0., xlim)
+        xmin = 0
+        ax.set_xlim(xmin, xlim)
+        ymin = 0
+        ymax4 = 0.07
+        ymax6 = 0.07
+        #print(ymax4, ymax6)
+        ax.set_ylim(ymin, ymax4)
+        ax2.set_ylim(ymin, ymax6)
 
         title = "Age group " + str(i + 1) 
         ax.title.set_text(title)
@@ -1958,7 +1971,7 @@ def sigma_shape_by_age_grp_sw_combined_Fm(sim,sigmaFm,snap,image_dir,age_grp=0,s
         #cax = divider.append_axes('right', size='5%', pad=0.05)
 
     fig.tight_layout()
-    suptit_name = snap.replace(".gz","") + " sigma amplitude per age group " + grp_sw + " Fm 4 and 6."
+    suptit_name = snap.replace(".gz","") + " sigma amplitude per age group - " + grp_sw_title + " Fm 4 and 6."
     fig.suptitle(suptit_name, fontsize=fs)  
     #plt.setp(axes[:], xlabel = 'x [kpc]')
     #plt.setp(axes[0], ylabel = 'y [kpc]')

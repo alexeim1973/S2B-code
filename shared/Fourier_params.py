@@ -2,7 +2,7 @@
 #model = 'run732HF'
 #model = 'run739HF'
 model = 'TNG50' # TNG50 skinny bar from Stuart Andersson
-model = 'TNG50Ctrl' # TNG50 skinny bar from Stuart Andersson
+#model = 'TNG50Ctrl' # TNG50 skinny bar from Stuart Andersson
 #model = 'run741CU' # Same age, problems with breaking into age groups
 #model = 'SB_models'
 #model = 'SB_nogas_models' # Same age, problems with breaking into age groups
@@ -74,7 +74,7 @@ plot_sigma_amp_combined = False
 
 # Plot LOS sigma Amplitude with combined Fourier moment 4 and 6 per age group
 plot_sigma_amp_per_ag_combined = True 
-plot_sigma_amp_per_ag_combined = False
+#plot_sigma_amp_per_ag_combined = False
 
 """
 !!! The following timeline based parameters only make sense for a galaxy model with many snapshots.
@@ -137,8 +137,8 @@ mass_fact = 1
 
 grp_sw = "even_age" # Even age groups 0 < 1/3(max_age) < 2/3(max_age) < max_age
 grp_sw_title = "even group age"
-grp_sw = "equal_pop" # age groups with equal populations 1/3 of total number of stars
-grp_sw_title = "equal group population"
+#grp_sw = "equal_pop" # age groups with equal populations 1/3 of total number of stars
+#grp_sw_title = "equal group population"
 
 # Sigma for Gaussian blur
 b_alpha_lst = [1,1.5,2]
