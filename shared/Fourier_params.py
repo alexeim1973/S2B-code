@@ -2,7 +2,7 @@
 #model = 'run732HF'
 #model = 'run739HF'
 model = 'TNG50' # TNG50 skinny bar from Stuart Andersson
-#model = 'TNG50Ctrl' # TNG50 skinny bar from Stuart Andersson
+model = 'TNG50Ctrl' # TNG50 skinny bar from Stuart Andersson
 #model = 'run741CU' # Same age, problems with breaking into age groups
 #model = 'SB_models'
 #model = 'SB_nogas_models' # Same age, problems with breaking into age groups
@@ -22,11 +22,11 @@ manual_snap_list = False
 
 # Turn ON and OFF logging in functions
 log = True
-#log = False
+log = False
 
 # print out datasets and metadata
 verbose_log = True
-#verbose_log = False
+verbose_log = False
 
 # Turn ON and OFF show plotting in functions
 show_plot = True
@@ -74,7 +74,7 @@ plot_sigma_amp_combined = False
 
 # Plot LOS sigma Amplitude with combined Fourier moment 4 and 6 per age group
 plot_sigma_amp_per_ag_combined = True 
-#plot_sigma_amp_per_ag_combined = False
+plot_sigma_amp_per_ag_combined = False
 
 """
 !!! The following timeline based parameters only make sense for a galaxy model with many snapshots.
@@ -127,16 +127,22 @@ else:
     #xlim, ylim = 5., 5. # kpc - primary bar
     xlim, ylim = 7., 7. # kpc - primary bar plus a bit more
 
+num_stars = True
+#num_stars = False
+
 cmap_dens = "hot"
 cmap_velo = "hot"
 
 mass_fact = 1
 
-grp_sw = "fixed_age" # Fixed age groups 0 < 1/3(max_age) < 2/3(max_age) < max_age
-grp_sw = "eq_pop" # age groups with equal populations 1/3(total_stars)
+grp_sw = "even_age" # Even age groups 0 < 1/3(max_age) < 2/3(max_age) < max_age
+grp_sw_title = "even group age"
+grp_sw = "equal_pop" # age groups with equal populations 1/3 of total number of stars
+grp_sw_title = "equal group population"
 
 # Sigma for Gaussian blur
-blur_lst = [2,3,4,5]
+b_alpha_lst = [1,1.5,2]
+b_sigma_lst = [1.5,2,2.5]
 
 barFm = 2 # Fourier moment for bar
 sigmaFm = [4,6] # Fourier moment for sigma

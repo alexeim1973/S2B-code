@@ -240,7 +240,7 @@ def sum_columns_and_rows(matrix):
 
 # Divide star population in 3 groups 
 def grouping(sim):
-    if grp_sw == "fixed_age": # with fixed age dividers 0 < 1/3 < 2/3 < 1
+    if grp_sw == "even_age": # with fixed age dividers 0 < 1/3 < 2/3 < 1
         min_age = np.min(sim.star['age'])
         max_age = np.max(sim.star['age'])
         edges = np.linspace(min_age, max_age, 4)  # Divides into 3 equal age bins
@@ -252,7 +252,7 @@ def grouping(sim):
                 mask = (sim.star['age'] >= edges[i]) & (sim.star['age'] <= edges[i+1])  # include max in last bin
             grp = sim.star[mask]
             groups.append(grp)
-    elif grp_sw == "eq_pop": # by age with equal population 1/3(total_stars) per group
+    elif grp_sw == "equal_pop": # by age with equal population 1/3(total_stars) per group
         # Sort stars by age
         sorted_indices = np.argsort(sim.star['age'])
         sorted_stars = sim.star[sorted_indices]
@@ -289,6 +289,13 @@ def check_ages(sim):
         exit # Stop if min and max ages are the same
 
 
+# Apply unsharp mask to 2D stats
+def apply_umask(stats,b_alpha,b_sigma):
+    blurred = gf(stats, b_sigma)  # Apply Gaussian blur
+    sharpened = stats + b_alpha * (stats - blurred)  # Unsharp masking
+    return sharpened
+
+
 # Plots face-on number dencity
 def plot_density(cmap,sim,snap,image_dir,save_file=True):
 
@@ -310,10 +317,17 @@ def plot_density(cmap,sim,snap,image_dir,save_file=True):
         unit = 2*xlim/bins
         if verbose_log:
             print("Unit in kpc:", round(unit,2))
-        e = ellipticity_quadrupole(unit,bins,df_stat2d)
-        e1 = ellipticity_from_moments(df_stat2d, xlim, bins)
-        print('*** Ellipticity:', e)
-        print('*** Ellipticity using moments:', e1)
+        e1 = ellipticity_quadrupole(unit,bins,df_stat2d)
+        e2 = ellipticity_from_moments(df_stat2d, xlim, bins)
+        r3_list, e3_list, e3 = fit_ellipses_to_density(df_stat2d, bins, num_ellipses)
+        print('*** Ellipticity from quadrupole:', e1)
+        print('*** Ellipticity using moments:', e2)
+        print('*** Ellipticity from ellipse fitting:', e3)
+        # Pick the ellipticity method for the rest of calculations
+        # 1 - quadrupoles
+        # 2 - moments
+        # 3 - ellipse fitting
+        e = round(e3,2)
 
     x_panels = 1
     y_panels = 1
@@ -332,10 +346,10 @@ def plot_density(cmap,sim,snap,image_dir,save_file=True):
     xcent = (df_xedges[1:] + df_xedges[:-1]) / 2
     ycent = (df_yedges[1:] + df_yedges[:-1]) / 2
     plt.contour(xcent, ycent, np.log10(df_stat2d.T), linewidths = 0.5, linestyles = 'dashed', colors = 'k')
-    if show_e:
-        plt.title(snap + " - face-on num density. Bar ellipticity " + str(e1))
+    if show_e and e:
+        plt.title(snap + " - face-on number density. Bar ellipticity " + str(e))
     else:
-        plt.title(snap + " - face-on num density.")
+        plt.title(snap + " - face-on number density.")
     axes = plt.gca()
     axes.set_xlabel('x [kpc]')
     axes.set_ylabel('y [kpc]')
@@ -354,110 +368,6 @@ def plot_density(cmap,sim,snap,image_dir,save_file=True):
         plt.show()
     else:
         print("On-screen ploting is turned off.")
-
-    return fig
-
-
-# Plots number dencity for age groups
-def plot_density_by_age(cmap,sim,pos,xlim,ylim,bins,snap,image_dir,e_list=False,save_file=True,show_plot=True,verbose_log=False):
-
-    stat2d_lst = []
-
-    # Divide snapshot into 3 age groups
-    min_age = round(min(sim.star['age']),2)
-    max_age = round(max(sim.star['age']),2)
-    if verbose_log:
-        print('* Min stellar age - ' + str(min_age) + ' Gyr.')
-        print('* Max stellar age - ' + str(max_age) + ' Gyr.')
-        print('** Stars in snapshot - ', len(sim.star))
-    if min_age == max_age:
-        print("** Cannot split into age groups for this snapshot.")
-        print("** The min age and the max age of the stars are the same.")
-        exit
-
-    # Number density statistics per age group
-    div = 1/3
-    divlr_lst = [[0,div],[div,2*div],[2*div,max_age]]
-    age_grp = 0
-
-    for divlr in divlr_lst:
-        age_grp += 1
-        div_l = divlr[0]
-        div_r = divlr[1]
-        # Mask stars between age dividers div_l and div_r
-        mask = ma.masked_inside(sim.star['age'], max_age*div_l, max_age*div_r).mask
-        # print(len(mask))
-        grp = sim.star[mask]
-        if verbose_log:
-            print('*** Stars in age group', age_grp, ' - ', len(grp.star['age']))
-            grp_min_age = round(min(grp.star['age']),2)
-            grp_max_age = round(max(grp.star['age']),2)
-            print('***** Min stellar age in group - ' + str(grp_min_age) + ' Gyr.')
-            print('***** Max stellar age in group - ' + str(grp_max_age) + ' Gyr.')
-            if e_list:
-                print("*** Bar ellipticity - ", e_list[age_grp-1])
-        
-        #Extract phase space data for the model for stars in the group
-        z_, x_, y_ = grp.star['z'], grp.star['x'], grp.star['y']
-    
-        # Number density statistics face-on for stellar population by age group
-        dfg_stat2d,dfg_xedges,dfg_yedges,df_binnum2d = st.binned_statistic_2d(x_, y_, z_,
-                                    statistic = 'count',
-                                    range = [[-xlim,xlim],[-ylim,ylim]],
-                                    bins = bins)
-        stat2d_lst.append(dfg_stat2d.T)
-
-    x_panels = 3
-    y_panels = 1
-
-    figsize_x = 3*x_panels      # inches
-    figsize_y = 3.5*y_panels    # inches
-
-    # Make the figure and sub plots
-    fig,axes = plt.subplots(y_panels,x_panels,figsize=(figsize_x,figsize_y))
-    
-    for i in range(x_panels):
-                image = axes[i].imshow(stat2d_lst[i], 
-                            origin = 'lower',
-                            extent = [-xlim, xlim, -ylim, ylim ],
-                            norm = LogNorm(),
-                            cmap = cmap)
-                xcent = (dfg_xedges[1:] + dfg_xedges[:-1]) / 2
-                ycent = (dfg_yedges[1:] + dfg_yedges[:-1]) / 2
-                axes[i].contour(xcent, ycent, np.log10(stat2d_lst[i]), linewidths = 0.5, linestyles = 'dashed', colors = 'k')
-                if e_list:
-                    axes[i].title.set_text("Age group " + str(i+1) + " e = " + str(e_list[i]))
-                else:
-                    axes[i].title.set_text("Age group " + str(i+1))
-                circle1 = plt.Circle((0, 0), 0.5, color='green', fill=False)
-                circle2 = plt.Circle((0, 0), 0.75, color='green', fill=False)
-                axes[i].add_patch(circle1)
-                axes[i].add_patch(circle2)
-
-    divider = make_axes_locatable(axes[i])
-    cax = divider.append_axes('right', size='5%', pad=0.05)
-    cbar = fig.colorbar(image, cax=cax, orientation='vertical')
-    #cbar.set_label(cbar_label_lst[i])
-    if i > 0:
-        axes[i].set_yticklabels([])
-
-    fig.tight_layout()
-    fig.suptitle(snap.replace(".gz","") + " num density.")
-    plt.setp(axes[:], xlabel = 'x [kpc]')
-    plt.setp(axes[0], ylabel = 'y [kpc]')
-
-    if save_file:
-        image_name = image_dir + snap.replace(".gz","") + pos + '_density_by_age_3grp_' + str(xlim) + 'kpc' + '.png'
-        plt.savefig(image_name)
-        print("Image saved to",image_name)
-    else:
-        print("Image saving is turned off.")
-    if show_plot:
-        plt.show()
-    else:
-        print("On-screen ploting is turned off.")
-
-    del stat2d_lst
 
     return fig
 
@@ -481,7 +391,11 @@ def plot_density_by_age_grp_sw(cmap,sim,pos,snap,image_dir,e_list=False,save_fil
     # Call the grouping function 
     groups = grouping(sim)
 
+    # Count number of stars in each group
+    grp_stars_lst = []
+
     for grp in groups:
+        grp_stars_lst.append(len(grp.star['z']))
         age_grp += 1
         if verbose_log:
             print_ages(grp,"group")
@@ -498,14 +412,10 @@ def plot_density_by_age_grp_sw(cmap,sim,pos,snap,image_dir,e_list=False,save_fil
                                     bins = bins)
         stat2d_lst.append(dfg_stat2d.T)
 
-    x_panels = 3
-    y_panels = 1
-
-    figsize_x = 3*x_panels      # inches
-    figsize_y = 3.5*y_panels    # inches
-
-    # Make the figure and sub plots
-    fig,axes = plt.subplots(y_panels,x_panels,figsize=(figsize_x,figsize_y))
+    # Setup for plotting
+    x_panels, y_panels = 3, 1
+    figsize_x, figsize_y = 3 * x_panels, 3.5 * y_panels
+    fig, axes = plt.subplots(y_panels, x_panels, figsize=(figsize_x, figsize_y))
     
     for i in range(x_panels):
                 image = axes[i].imshow(stat2d_lst[i], 
@@ -516,24 +426,30 @@ def plot_density_by_age_grp_sw(cmap,sim,pos,snap,image_dir,e_list=False,save_fil
                 xcent = (dfg_xedges[1:] + dfg_xedges[:-1]) / 2
                 ycent = (dfg_yedges[1:] + dfg_yedges[:-1]) / 2
                 axes[i].contour(xcent, ycent, np.log10(stat2d_lst[i]), linewidths = 0.5, linestyles = 'dashed', colors = 'k')
+                sup_title = "Grp " + str(i+1)
                 if e_list:
-                    axes[i].title.set_text("Age group " + str(i+1) + " e = " + str(e_list[i]))
-                else:
-                    axes[i].title.set_text("Age group " + str(i+1))
+                    sup_title = sup_title + " e = " + str(e_list[i])
+                if num_stars:
+                    sup_title = sup_title +  " stars " + str(grp_stars_lst[i])
+                    #axes[i].title.set_text("Group " + str(i+1) + str(grp_stars_lst[i]) + " stars" + " e = " + str(e_list[i]))
+                #else:
+                    #axes[i].title.set_text("Group " + str(i+1) + str(grp_stars_lst[i]) + " stars")
+                axes[i].title.set_text(sup_title)
                 circle1 = plt.Circle((0, 0), 0.5, color='green', fill=False)
                 circle2 = plt.Circle((0, 0), 0.75, color='green', fill=False)
                 axes[i].add_patch(circle1)
                 axes[i].add_patch(circle2)
 
-    divider = make_axes_locatable(axes[i])
-    cax = divider.append_axes('right', size='5%', pad=0.05)
-    cbar = fig.colorbar(image, cax=cax, orientation='vertical')
-    #cbar.set_label(cbar_label_lst[i])
+    # Add a shared colorbar after plotting all subplots
+    fig.tight_layout()
+    fig.subplots_adjust(right=0.85)
+    cbar_ax = fig.add_axes([0.88, 0.15, 0.02, 0.7])  # [left, bottom, width, height]
+    fig.colorbar(image, cax=cbar_ax)
+
     if i > 0:
         axes[i].set_yticklabels([])
 
-    fig.tight_layout()
-    suptit_name = snap.replace(".gz","") + " num density " + grp_sw 
+    suptit_name = snap.replace(".gz","") + " number density - " + grp_sw_title 
     fig.suptitle(suptit_name)
     plt.setp(axes[:], xlabel = 'x [kpc]')
     plt.setp(axes[0], ylabel = 'y [kpc]')
@@ -617,31 +533,12 @@ def ellipticity_from_moments(density, xlim, bins):
 
 
 # This function calculates a bar ellipticity using ellipse fit method
-def ellipticity_from_ellipse_fit(density, unit):
-    center = density.shape[0] // 2
-    geometry = EllipseGeometry(x0=center, y0=center, sma=5, eps=0.1, pa=0)
-    ellipse = Ellipse(density, geometry)  # ← pass raw array directly
-    isolist = ellipse.fit_image()
+def fit_ellipses_to_density_old(stat2d, bins, num_ellipses):
 
-    if isolist is None or len(isolist) == 0:
-        if verbose_log:
-            print("Isolist is None!")
-        return [], []
-
-    radii = [iso.sma * unit for iso in isolist]
-    ellipticities = [iso.eps for iso in isolist]
-
-    return radii, ellipticities
-
-
-# This function calculates a bar ellipticity using ellipse fit method
-def fit_ellipses_to_density(density, bins, num_ellipses, verbose=True):
-
-    #xs, ys = get_density_peak_center(density)
-    #xs, ys = 11, 11
+    density = stat2d.T
 
     ys, xs = np.unravel_index(np.argmax(density), density.shape)
-    if verbose:
+    if verbose_log:
         print("Density peak center is:", xs, ys)
 
     sma = bins / 4
@@ -654,7 +551,7 @@ def fit_ellipses_to_density(density, bins, num_ellipses, verbose=True):
     estep = bins / (num_ellipses - 1) / 2
     isolist = ellipse.fit_image(step=estep, maxsma=0.95*bins/2, linear=True, maxgerr=2)
 
-    if verbose:
+    if verbose_log:
         center_pix = (density.shape[1] // 2, density.shape[0] // 2)
         print("Density array center (x, y):", center_pix)
         t = isolist.to_table()
@@ -662,108 +559,148 @@ def fit_ellipses_to_density(density, bins, num_ellipses, verbose=True):
         print("Isophotes center, ellipticity, semi-major axis, position angle")
         print(t['x0', 'y0', 'ellipticity', 'sma', 'pa'][:20])  # First few isophotes
 
-    return isolist
+    t = isolist.to_table()
+    smas = t['sma']
+    epsilons = t['ellipticity']
+    smas_kpc = smas * (2 * xlim / bins)
+    #pas_deg = t['pa']
+    if smas_kpc.any() and epsilons.any():
+        r_list = smas_kpc
+        e_list = epsilons
+        # --- Find all local maxima ---
+        peaks, _ = find_peaks(epsilons)
+        # Find the second peak or report if less than 2 peaks is found
+        if len(peaks) == 0:
+            print("[WARNING] No peaks found in ellipticity fitting, using the maximum value instead.")
+            # code here to find a global maximum.
+        elif len(peaks) == 1:
+            print("[WARNING] Only one peak found in ellipticity fitting.")
+            print(len(peaks))
+            peak_idx = peaks[0] if len(peaks) > 0 else None
+            e = epsilons[peak_idx]
+            print(e)
+            print('*** peak of ellipticity using fitting:', round(e,2))
+        else: # picking the second peak
+            # Sort peaks by sma (i.e., radial order) and ignore the first (inner peak)
+            peaks_sorted_by_sma = sorted(peaks, key=lambda i: smas[i])
+            second_peak_idx = peaks_sorted_by_sma[1]
+            e = epsilons[second_peak_idx]
+            print('*** second peak of ellipticity using fitting:', round(e,2))
+    else: # There is no ellipse fitting possible
+        r_list = False
+        e_list = False
+        e = False
+
+    return r_list, e_list, round(e,2)
 
 
-# Plots bar ellipticity
-def bar_ellipticity_by_age(sim,xlim,ylim,bins,snap,image_dir,save_file=True,show_plot=True,verbose_log=True):
+def fit_ellipses_to_density(stat2d, bins, num_ellipses,
+                            xlim=None,                 # pass if you want smas in kpc
+                            verbose_log=False,
+                            peak_kwargs=None):         # optional: tweak find_peaks
+    """
+    Returns:
+      r_list : array or False
+      e_list : array or False
+      e_bar  : float or False  (chosen ellipticity: 2nd local peak if exists,
+                                else 1st local peak if only one,
+                                else global maximum)
+    """
+    if peak_kwargs is None:
+        # plateau_size=True lets flat maxima be considered peaks; tune as needed
+        peak_kwargs = dict(plateau_size=True)
 
-    # Divide snapshot into 3 age groups
-    min_age = round(min(sim.star['age']),2)
-    max_age = round(max(sim.star['age']),2)
+    density = stat2d.T
+
+    ys, xs = np.unravel_index(np.argmax(density), density.shape)
     if verbose_log:
-        print('* Min stellar age - ' + str(min_age) + ' Gyr.')
-        print('* Max stellar age - ' + str(max_age) + ' Gyr.')
-        print('** Stars in snapshot - ', len(sim.star))
-    if min_age == max_age:
-        print("** Cannot split into age groups for this snapshot.")
-        print("** The min age and the max age of the stars are the same.")
-        exit
-            
-    # Number density statistics per age group
-    div = 1/3
-    divlr_lst = [[0,div],[div,2*div],[2*div,max_age]]
-    age_grp = 0
+        print("Density peak center is:", xs, ys)
 
-    # List of ellipticities and radii per age group for plotting
-    e_list = [[],[],[]]
-    r_list = [[],[],[]]
-    e_age_grp = []
+    sma = bins / 4
+    eps = 0.2
+    pa = 1. / 180. * np.pi
 
-    for divlr in divlr_lst:
-        age_grp += 1
-        div_l = divlr[0]
-        div_r = divlr[1]
-        # Mask stars between age dividers div_l and div_r
-        mask = ma.masked_inside(sim.star['age'], max_age*div_l, max_age*div_r).mask
-        # print(len(mask))
-        grp = sim.star[mask]
+    g = EllipseGeometry(xs, ys, sma, eps, pa)
+    g.fix_center = True
+    ellipse = Ellipse(density, geometry=g)
+
+    estep = bins / (num_ellipses - 1) / 2
+    isolist = ellipse.fit_image(step=estep, maxsma=0.95*bins/2, linear=True, maxgerr=2)
+
+    t = isolist.to_table()
+    smas = np.asarray(t['sma'])
+    epsilons = np.asarray(t['ellipticity'])
+
+    # Map radii to physical units if xlim provided; otherwise keep pixels
+    if xlim is not None:
+        smas_kpc = smas * (2 * xlim / bins)
+        r_list = smas_kpc
+    else:
+        r_list = smas
+
+    if verbose_log:
+        center_pix = (density.shape[1] // 2, density.shape[0] // 2)
+        print("Density array center (x, y):", center_pix)
+        print(t.colnames)
+        print("Isophotes center, ellipticity, semi-major axis, position angle (first 20)")
+        print(t['x0', 'y0', 'ellipticity', 'sma', 'pa'][:20])
+
+    # Guard: empty or all-NaN epsilons
+    if epsilons.size == 0 or np.all(~np.isfinite(epsilons)):
         if verbose_log:
-            print('*** Stars in age group', age_grp, ' - ', len(grp.star['age']))
+            print("[WARNING] No valid ellipticity samples; ellipse fitting failed.")
+        return False, False, False
 
-        #Extract phase space data for the model for stars in the group
-        z_, x_, y_ = grp.star['z'], grp.star['x'], grp.star['y']
-    
-        # Number density statistics face-on for stellar population in the group
-        dfg_stat2d,dfg_xedges,dfg_yedges,df_binnum2d = st.binned_statistic_2d(x_, y_, z_,
-                                    statistic = 'count',
-                                    range = [[-xlim,xlim],[-ylim,ylim]],
-                                    bins = bins)
-
-        unit = 2*xlim/bins
+    # Clean NaNs for peak finding, but keep indices aligned
+    valid = np.isfinite(epsilons)
+    if not np.all(valid):
         if verbose_log:
-            print("Unit in kpc:", round(unit,2))
+            print(f"[INFO] Masking {np.count_nonzero(~valid)} NaN/inf ellipticity values.")
+    eps_clean = np.where(valid, epsilons, -np.inf)
 
-        e = ellipticity_quadrupole(unit,bins,dfg_stat2d)
-        print('*** Age group', age_grp, 'ellipticity:', e)
-        e_age_grp.append(e)
+    # --- Local peaks
+    peaks, props = find_peaks(eps_clean, **peak_kwargs)
 
+    # Keep only peaks that were valid points
+    peaks = np.array([i for i in peaks if valid[i]], dtype=int)
+
+    e_bar = None
+    if len(peaks) == 0:
+        # --- Fallback: global maximum (handles monotonic series too)
         if verbose_log:
-            for radius in range(1,int(bins/2)+1):
-                sub_list = extract_sublist(dfg_stat2d, radius)
-                e = ellipticity_quadrupole(unit,2*radius,sub_list)
-                e_list[age_grp-1].append(e)
-                r_list[age_grp-1].append(round(radius*unit,2))
-                if verbose_log:
-                    print('*** Radius:', round(radius*unit,2), " kpc, ", 'ellipticity:', e)
+            print("[WARNING] No local peaks; using global maximum.")
+        # If multiple equal maxima (plateau), take the first by radius
+        max_val = np.nanmax(epsilons)
+        cand = np.flatnonzero(np.isfinite(epsilons) & (epsilons == max_val))
+        peak_idx = int(cand[0]) if cand.size > 0 else None
 
-        x_panels = 3
-        y_panels = 1
-        figsize_x = 3*x_panels      # inches
-        figsize_y = 3.5*y_panels    # inches
+    elif len(peaks) == 1:
+        if verbose_log:
+            print("[WARNING] Only one local peak found.")
+        peak_idx = peaks[0]
 
-        # Make the figure and sub plots
-        fig,axes = plt.subplots(y_panels,x_panels,figsize=(figsize_x,figsize_y))
-    
-        for i in range(x_panels):
-            image = axes[i].plot(r_list[i],e_list[i])
-            axes[i].title.set_text("Age group " + str(i+1))
-            # axes[i].set_ylim(min(e_list[age_grp-1]), max(e_list[age_grp-1]))
+    else:
+        # ≥2 local peaks — choose the second by increasing radius (sma)
+        peaks_sorted_by_sma = sorted(peaks, key=lambda i: smas[i])
+        peak_idx = peaks_sorted_by_sma[1]
 
-            divider = make_axes_locatable(axes[i])
-            cax = divider.append_axes('right', size='5%', pad=0.05)
-            #cbar = fig.colorbar(image, cax=cax, orientation='vertical')
-            #cbar.set_label(cbar_label_lst[i])
-            if i > 0:
-                axes[i].set_yticklabels([])
+    if peak_idx is None:
+        return r_list, epsilons, False
 
-            fig.tight_layout()
-            fig.suptitle(snap.replace(".gz","") + " bar ellipticity per age group.")
-            plt.setp(axes[:], xlabel = 'R [kpc]')
-            plt.setp(axes[0], ylabel = 'e')
+    e_bar = float(epsilons[peak_idx])
 
-            if save_file:
-                image_name = image_dir + snap.replace(".gz","") + '_ellipticity_by_age_3grp_' + str(xlim) + 'kpc' + '.png'
-                plt.savefig(image_name)
-                print("Image saved to",image_name)
-            else:
-                print("Image saving is turned off.")
-            if show_plot:
-                plt.show()
-            else:
-                print("On-screen ploting is turned off.")
+    # Optional logging
+    if len(peaks) >= 2:
+        if verbose_log:
+            print('*** second peak of ellipticity using fitting:', round(e_bar, 2))
+    elif len(peaks) == 1:
+        if verbose_log:
+            print('*** peak of ellipticity using fitting:', round(e_bar, 2))
+    else:
+        if verbose_log:
+            print('*** global max of ellipticity using fitting:', round(e_bar, 2))
 
-    return e_age_grp
+    return r_list, epsilons, round(e_bar, 2)
 
 
 # Plots bar ellipticity using grouping switch
@@ -771,7 +708,7 @@ def bar_ellipticity_by_age_grp_sw(sim,snap,image_dir,save_file=True):
 
     x_panels = 3
     y_panels = 1
-    figsize_x = 4*x_panels      # inches
+    figsize_x = 4*x_panels    # inches
     figsize_y = 4*y_panels    # inches
 
     # Make the figure and sub plots
@@ -819,31 +756,11 @@ def bar_ellipticity_by_age_grp_sw(sim,snap,image_dir,save_file=True):
         if verbose_log:
             print("Unit in kpc:", round(unit,2))
 
-        e1 = ellipticity_quadrupole(unit,bins,dfg_stat2d)
+        e1 = ellipticity_quadrupole(unit, bins, dfg_stat2d)
         e2 = ellipticity_from_moments(dfg_stat2d, xlim, bins)
+        r3_list[i], e3_list[i], e3 = fit_ellipses_to_density(dfg_stat2d, bins, num_ellipses, xlim)
 
-        isolist = fit_ellipses_to_density(dfg_stat2d.T, bins, num_ellipses, verbose=True)
-        t = isolist.to_table()
-        smas = t['sma']
-        epsilons = t['ellipticity']
-        smas_kpc = smas * (2 * xlim / bins)
-        #pas_deg = t['pa']
-        if smas_kpc.any() and epsilons.any():
-            r3_list[i] = smas_kpc
-            e3_list[i] = epsilons
-            # --- Find all local maxima ---
-            peaks, _ = find_peaks(epsilons)
-            # Find the second peak or report if less than 2 peaks is found
-            if len(peaks) < 2:
-                print("[WARNING] Fewer than two peaks found in ellipticity fitting.")
-                peak_idx = peaks[0] if len(peaks) > 0 else None
-                print('*** Age group', age_grp, 'peak of ellipticity using fitting:', epsilons[peak_idx])
-            else:
-                # Sort peaks by sma (i.e., radial order) and ignore the first (inner peak)
-                peaks_sorted_by_sma = sorted(peaks, key=lambda i: smas[i])
-                second_peak_idx = peaks_sorted_by_sma[1]
-                print('*** Age group', age_grp, 'second peak of ellipticity using fitting:', epsilons[second_peak_idx])
-        else:
+        if e3 is False:
             print(f"[WARNING] Skipping ellipse fitting plot for age group {age_grp}")
 
         #print('*** Age group', age_grp, 'ellipticity:', e1)
@@ -851,7 +768,11 @@ def bar_ellipticity_by_age_grp_sw(sim,snap,image_dir,save_file=True):
         #if(epsilons.any()): print('*** Age group', age_grp, 'second peak of ellipticity using fitting:', epsilons[second_peak_idx])
         
         # Pick the ellipticity method for the rest of calculations
-        e_age_grp.append(e2)
+        # 1 - quadrupoles
+        # 2 - moments
+        # 3 - ellipse fitting
+        e = round(e3,2)
+        e_age_grp.append(e)
 
         for radius in range(1,int(bins/2)+1):
             sub_list = extract_sublist(dfg_stat2d, radius)
@@ -873,15 +794,17 @@ def bar_ellipticity_by_age_grp_sw(sim,snap,image_dir,save_file=True):
 
         axes[i].plot(r1_list[i],e1_list[i], color = "blue", label = "Quadrupole method")
         axes[i].plot(r2_list[i],e2_list[i], color = "red", label = "Inertia tensor method")
-        for e in range (len(r3_list[i])):
-            r3_list[i][e] += r1_list[i][0]                 
-        axes[i].plot(r3_list[i], e3_list[i], color = "green", label = "Ellipse fitting method")
+        if e:
+            for el in range (len(r3_list[i])):
+                r3_list[i][el] += r1_list[i][0]                 
+            axes[i].plot(r3_list[i], e3_list[i], color = "green", label = "Ellipse fitting method")
         axes[i].title.set_text("Age group " + str(i+1))
 
     if verbose_log:
         print("Ellipticity from quadrupole elements:", len(e1_list[1]))
         print("Ellipticity from moments elements:", len(e2_list[1]))
-        print("Ellipticity from fitting elements:", len(e3_list[1]))
+        if e:
+            print("Ellipticity from fitting elements:", len(e3_list[1]))
 
     # Add legend to whole figure
     #handles, labels = axes[0].get_legend_handles_labels()
@@ -896,7 +819,7 @@ def bar_ellipticity_by_age_grp_sw(sim,snap,image_dir,save_file=True):
 
     # Layout tweaks
     #fig.tight_layout(rect=[0, 0.05, 1, 0.95])
-    suptit_name = snap.replace(".gz","") + " bar ellipticity per age group " + grp_sw 
+    suptit_name = snap.replace(".gz","") + " bar ellipticity per age group - " + grp_sw_title 
     fig.suptitle(suptit_name, fontsize=14, y=1.03)
     plt.setp(axes[:], xlabel = 'R [kpc]')
     plt.setp(axes[0], ylabel = 'e')
@@ -1143,42 +1066,6 @@ def bar_length_Fm(sim,Fm,snap,image_dir,age_grp=0,save_file=True):
     return None
 
 
-# Wrap function for age groups, calls bar_length_Fm
-def bar_length_by_age_Fm(sim,Fm,snap,image_dir,save_file=True):
-
-    # Divide snapshot into 3 age groups
-    min_age = round(min(sim.star['age']),2)
-    max_age = round(max(sim.star['age']),2)
-    if verbose_log:
-        print('* Min stellar age - ' + str(min_age) + ' Gyr.')
-        print('* Max stellar age - ' + str(max_age) + ' Gyr.')
-        print('** Stars in snapshot - ', len(sim.star))
-    if min_age == max_age:
-        print("** Cannot split into age groups for this snapshot.")
-        print("** The min age and the max age of the stars are the same.")
-        exit
-            
-    # Number density statistics per age group
-    div = 1/3
-    divlr_lst = [[0,div],[div,2*div],[2*div,max_age]]
-    age_grp = 0
-
-    for divlr in divlr_lst:
-        age_grp += 1
-        div_l = divlr[0]
-        div_r = divlr[1]
-        # Mask stars between age dividers div_l and div_r
-        mask = ma.masked_inside(sim.star['age'], max_age*div_l, max_age*div_r).mask
-        # print(len(mask))
-        grp = sim.star[mask]
-        if verbose_log:
-            print('*** Stars in age group', age_grp, ' - ', len(grp.star['age']))
-    
-        bar_length_Fm(grp,Fm,snap,image_dir,age_grp,save_file)
-
-    return None
-
-
 # Wrap function for age groups using grouping switch, calls bar_length_Fm
 def bar_length_by_age_grp_sw_Fm(sim,Fm,snap,image_dir,save_file=True):
 
@@ -1265,7 +1152,7 @@ def plot_sigma(cmap,sim,xlim,ylim,bins,snap,image_dir,save_file=True,show_plot=T
 
 
 # Plots edge-on sigma using the unsharp mask
-def plot_sigma_umask(cmap,sim,xlim,ylim,bins,blur,snap,image_dir,save_file=True,show_plot=True,verbose_log=False):
+def plot_sigma_umask(cmap,sim,xlim,ylim,bins,b_alpha,b_sigma,snap,image_dir,save_file=True,show_plot=True,verbose_log=False):
 
     # Extract phase space data for the model
     vz_, x_, y_ = sim.star['vz'], sim.star['x'], sim.star['y']
@@ -1279,8 +1166,7 @@ def plot_sigma_umask(cmap,sim,xlim,ylim,bins,blur,snap,image_dir,save_file=True,
     )
 
     # Apply Unsharp Mask
-    blurred = gf(vd_stat2d, sigma=blur)  # Apply Gaussian blur
-    sharpened = vd_stat2d + (vd_stat2d - blurred)  # Unsharp masking
+    sharpened = apply_umask(vd_stat2d,b_alpha,b_sigma)
 
     x_panels = 1
     y_panels = 1
@@ -1314,13 +1200,14 @@ def plot_sigma_umask(cmap,sim,xlim,ylim,bins,blur,snap,image_dir,save_file=True,
     cbar = plt.colorbar(img, cax=cax, orientation='vertical')
 
     fig.tight_layout()
-    fig.suptitle(snap.replace(".gz", "") + " LOS velocity dispersion (sharp " + str(blur) + ").")
+    suptit_name = snap.replace(".gz", "") + " LOS velocity dispersion " + f" (alpha {b_alpha} sigma {b_sigma})."
+    fig.suptitle(suptit_name)
     axes.set_xlabel('y [kpc]')
     axes.set_ylabel('z [kpc]')
 
     # Save or show the plot
     if save_file:
-        image_name = f"{image_dir}{snap.replace('.gz', '')}_sigma_{xlim}kpc_umask_b{blur}.png"
+        image_name = f"{image_dir}{snap.replace('.gz', '')}_sigma_{xlim}kpc_ba{b_alpha}_bs{b_sigma}.png"
         plt.savefig(image_name)
         print("Image saved to", image_name)
     else:
@@ -1332,101 +1219,6 @@ def plot_sigma_umask(cmap,sim,xlim,ylim,bins,blur,snap,image_dir,save_file=True,
         print("On-screen plotting is turned off.")
 
     del vd_stat2d
-
-    return fig
-
-
-# Plots edge-on sigma for age groups
-def plot_sigma_by_age(cmap,sim,xlim,ylim,bins,snap,image_dir,save_file=True,show_plot=True,verbose_log=False):
-
-    x_panels = 3
-    y_panels = 1
-
-    figsize_x = 3*x_panels      # inches
-    figsize_y = 3.5*y_panels    # inches
-
-    # Make the figure and sub plots
-    fig,axes = plt.subplots(y_panels,x_panels,figsize=(figsize_x,figsize_y))
-    
-    stat2d_lst = []
-
-    # Divide snapshot into 3 age groups
-    min_age = round(min(sim.star['age']),2)
-    max_age = round(max(sim.star['age']),2)
-    if verbose_log:
-        print('* Min stellar age - ' + str(min_age) + ' Gyr.')
-        print('* Max stellar age - ' + str(max_age) + ' Gyr.')
-        print('** Stars in snapshot - ', len(sim.star))
-    if min_age == max_age:
-        print("** Cannot split into age groups for this snapshot.")
-        print("** The min age and the max age of the stars are the same.")
-        exit
-            
-    # Number density statistics per age group
-    div = 1/3
-    divlr_lst = [[0,div],[div,2*div],[2*div,max_age]]
-    age_grp = 0
-
-    for divlr in divlr_lst:
-        age_grp += 1
-        div_l = divlr[0]
-        div_r = divlr[1]
-        # Mask stars between age dividers div_l and div_r
-        mask = ma.masked_inside(sim.star['age'], max_age*div_l, max_age*div_r).mask
-        # print(len(mask))
-        grp = sim.star[mask]
-        if verbose_log:
-            print('*** Stars in age group', age_grp, ' - ', len(grp.star['age']))
-    
-        #Extract phase space data from the model for the stars in the group
-        vz_, x_, y_ = grp.star['vz'], grp.star['x'], grp.star['y']
-    
-        # Number density statistics face-on for stellar population by age group
-        vdg_stat2d,vdg_xedges,vdg_yedges,df_binnum2d = st.binned_statistic_2d(x_, y_, vz_,
-                                    statistic = 'std',
-                                    range = [[-xlim,xlim],[-ylim,ylim]],
-                                    bins = bins)
-        stat2d_lst.append(vdg_stat2d.T)
-
-    for i in range(x_panels):
-                image = axes[i].imshow(stat2d_lst[i], 
-                            origin = 'lower',
-                            extent = [-xlim, xlim, -ylim, ylim ],
-                            cmap = cmap)
-                xcent = (vdg_xedges[1:] + vdg_xedges[:-1]) / 2
-                ycent = (vdg_yedges[1:] + vdg_yedges[:-1]) / 2
-                axes[i].contour(xcent, ycent, stat2d_lst[i], linewidths = 2, linestyles = 'dashed', colors = 'w')
-                axes[i].title.set_text("Age group " + str(i+1))
-                # For nuclear bars teh circle R is 0.5 and 0.75 
-                circle1 = plt.Circle((0, 0), 3, color='green', fill=False)
-                circle2 = plt.Circle((0, 0), 4, color='green', fill=False)
-                axes[i].add_patch(circle1)
-                axes[i].add_patch(circle2)
-
-    divider = make_axes_locatable(axes[i])
-    cax = divider.append_axes('right', size='5%', pad=0.05)
-    cbar = fig.colorbar(image, cax=cax, orientation='vertical')
-    #cbar.set_label(cbar_label_lst[i])
-    if i > 0:
-        axes[i].set_yticklabels([])
-
-    fig.tight_layout()
-    fig.suptitle(snap.replace(".gz","") + " LOS velocity dispersion.")
-    plt.setp(axes[:], xlabel = 'y [kpc]')
-    plt.setp(axes[0], ylabel = 'z [kpc]')
-
-    if save_file:
-        image_name = image_dir + snap.replace(".gz","") + '_sigma_by_age_3grp_' + str(xlim) + 'kpc' + '.png'
-        plt.savefig(image_name)
-        print("Image saved to",image_name)
-    else:
-        print("Image saving is turned off.")
-    if show_plot:
-        plt.show()
-    else:
-        print("On-screen ploting is turned off.")
-
-    del stat2d_lst
 
     return fig
 
@@ -1464,39 +1256,48 @@ def plot_sigma_by_age_grp_sw(cmap,sim,snap,image_dir,save_file=True):
                                     bins = bins)
         stat2d_lst.append(vdg_stat2d.T)
 
-    x_panels = 3
-    y_panels = 1
-
-    figsize_x = 3*x_panels      # inches
-    figsize_y = 3.5*y_panels    # inches
-
-    # Make the figure and sub plots
-    fig,axes = plt.subplots(y_panels,x_panels,figsize=(figsize_x,figsize_y))
+    # Setup for plotting
+    x_panels, y_panels = 3, 1
+    figsize_x, figsize_y = 3 * x_panels, 3.5 * y_panels
+    fig, axes = plt.subplots(y_panels, x_panels, figsize=(figsize_x, figsize_y))
     
-    for i in range(x_panels):
-                image = axes[i].imshow(stat2d_lst[i], 
-                            origin = 'lower',
-                            extent = [-xlim, xlim, -ylim, ylim ],
-                            cmap = cmap)
-                xcent = (vdg_xedges[1:] + vdg_xedges[:-1]) / 2
-                ycent = (vdg_yedges[1:] + vdg_yedges[:-1]) / 2
-                axes[i].contour(xcent, ycent, stat2d_lst[i], linewidths = 2, linestyles = 'dashed', colors = 'w')
-                axes[i].title.set_text("Age group " + str(i+1))
-                # For nuclear bars teh circle R is 0.5 and 0.75 
-                circle1 = plt.Circle((0, 0), 3, color='green', fill=False)
-                circle2 = plt.Circle((0, 0), 4, color='green', fill=False)
-                axes[i].add_patch(circle1)
-                axes[i].add_patch(circle2)
+    # Compute global min and max across all age groups
+    vmin = min(np.nanmin(d) for d in stat2d_lst)
+    vmax = max(np.nanmax(d) for d in stat2d_lst)
 
-    divider = make_axes_locatable(axes[i])
-    cax = divider.append_axes('right', size='5%', pad=0.05)
-    cbar = fig.colorbar(image, cax=cax, orientation='vertical')
+    for i in range(x_panels):
+            image = axes[i].imshow(stat2d_lst[i], 
+            origin = 'lower',
+            extent = [-xlim, xlim, -ylim, ylim ],
+            cmap=cmap,
+            vmin=vmin,
+            vmax=vmax
+            )
+            xcent = (vdg_xedges[1:] + vdg_xedges[:-1]) / 2
+            ycent = (vdg_yedges[1:] + vdg_yedges[:-1]) / 2
+            axes[i].contour(xcent, ycent, stat2d_lst[i], linewidths = 2, linestyles = 'dashed', colors = 'w')
+            axes[i].title.set_text("Age group " + str(i+1))
+            # For nuclear bars teh circle R is 0.5 and 0.75 
+            circle1 = plt.Circle((0, 0), 3, color='green', fill=False)
+            circle2 = plt.Circle((0, 0), 4, color='green', fill=False)
+            axes[i].add_patch(circle1)
+            axes[i].add_patch(circle2)
+
+    #divider = make_axes_locatable(axes[i])
+    #cax = divider.append_axes('right', size='5%', pad=0.05)
+    #cbar = fig.colorbar(image, cax=cax, orientation='vertical')
+
+    # Add a shared colorbar after plotting all subplots
+    fig.tight_layout()
+    fig.subplots_adjust(right=0.85)
+    cbar_ax = fig.add_axes([0.88, 0.15, 0.02, 0.7])  # [left, bottom, width, height]
+    fig.colorbar(image, cax=cbar_ax)
+
     #cbar.set_label(cbar_label_lst[i])
     if i > 0:
         axes[i].set_yticklabels([])
 
-    fig.tight_layout()
-    suptit_name = snap.replace(".gz","") + " LOS velocity dispersio " + grp_sw 
+    suptit_name = snap.replace(".gz","") + " LOS velocity dispersion - " + grp_sw_title 
     fig.suptitle(suptit_name)
     plt.setp(axes[:], xlabel = 'y [kpc]')
     plt.setp(axes[0], ylabel = 'z [kpc]')
@@ -1517,205 +1318,10 @@ def plot_sigma_by_age_grp_sw(cmap,sim,snap,image_dir,save_file=True):
     return fig
 
 
-# Plots edge-on sigma for age groups using the unsharp mask
-def plot_sigma_by_age_umask(cmap,sim,xlim,ylim,bins,blur,snap,image_dir,save_file=True,show_plot=True,verbose_log=False):
-
-    stat2d_lst = []
-
-    # Divide snapshot into 3 age groups
-    min_age = round(min(sim.star['age']),2)
-    max_age = round(max(sim.star['age']),2)
-    if verbose_log:
-        print('* Min stellar age - ' + str(min_age) + ' Gyr.')
-        print('* Max stellar age - ' + str(max_age) + ' Gyr.')
-        print('** Stars in snapshot - ', len(sim.star))
-    if min_age == max_age:
-        print("** Cannot split into age groups for this snapshot.")
-        print("** The min age and the max age of the stars are the same.")
-        exit
-            
-    # Number density statistics per age group
-    div = 1/3
-    divlr_lst = [[0,div],[div,2*div],[2*div,max_age]]
-    age_grp = 0
-
-    for divlr in divlr_lst:
-        age_grp += 1
-        div_l = divlr[0]
-        div_r = divlr[1]
-        # Mask stars between age dividers div_l and div_r
-        mask = ma.masked_inside(sim.star['age'], max_age*div_l, max_age*div_r).mask
-        # print(len(mask))
-        grp = sim.star[mask]
-        if verbose_log:
-            print('*** Stars in age group', age_grp, ' - ', len(grp.star['age']))
-    
-        #Extract phase space data for the model for stars in the group
-        vz_, x_, y_ = grp.star['vz'], grp.star['x'], grp.star['y']
-    
-        # Number density statistics face-on for stellar population by age group
-        vdg_stat2d,vdg_xedges,vdg_yedges,df_binnum2d = st.binned_statistic_2d(x_, y_, vz_,
-                                    statistic = 'std',
-                                    range = [[-xlim,xlim],[-ylim,ylim]],
-                                    bins = bins)
-        stat2d_lst.append(vdg_stat2d.T)
-
-    x_panels = 3
-    y_panels = 1
-
-    figsize_x = 3*x_panels      # inches
-    figsize_y = 3.5*y_panels    # inches
-
-    # Make the figure and sub plots
-    fig,axes = plt.subplots(y_panels,x_panels,figsize=(figsize_x,figsize_y))
-    
-    for i in range(x_panels):
-                
-                # Apply Unsharp Mask
-                blurred = gf(stat2d_lst[i], sigma=blur)  # Apply Gaussian blur
-                sharpened = stat2d_lst[i] + (stat2d_lst[i] - blurred)  # Unsharp masking
-
-                # Plot the sharpened image
-                image = axes[i].imshow(sharpened,
-                      origin='lower',
-                      extent=[-xlim, xlim, -ylim, ylim],
-                      cmap=cmap)
-
-                xcent = (vdg_xedges[1:] + vdg_xedges[:-1]) / 2
-                ycent = (vdg_yedges[1:] + vdg_yedges[:-1]) / 2
-                axes[i].contour(xcent, ycent, stat2d_lst[i], linewidths = 2, linestyles = 'dashed', colors = 'w')
-                axes[i].title.set_text("Age group " + str(i+1))
-                # For nuclear bars the circle R is 0.5 and 0.75 
-                circle1 = plt.Circle((0, 0), 3, color='green', fill=False)
-                circle2 = plt.Circle((0, 0), 4, color='green', fill=False)
-                axes[i].add_patch(circle1)
-                axes[i].add_patch(circle2)
-
-    divider = make_axes_locatable(axes[i])
-    cax = divider.append_axes('right', size='5%', pad=0.05)
-    cbar = fig.colorbar(image, cax=cax, orientation='vertical')
-    #cbar.set_label(cbar_label_lst[i])
-    if i > 0:
-        axes[i].set_yticklabels([])
-
-    fig.tight_layout()
-    fig.suptitle(snap.replace(".gz","") + " LOS velocity dispersion (sharp " + str(blur) + ").")
-    plt.setp(axes[:], xlabel = 'y [kpc]')
-    plt.setp(axes[0], ylabel = 'z [kpc]')
-
-    if save_file:
-        image_name = f"{image_dir}{snap.replace('.gz', '')}_sigma_by_age_3grp_{xlim}kpc_umask_b{blur}.png"
-        plt.savefig(image_name)
-        print("Image saved to",image_name)
-    else:
-        print("Image saving is turned off.")
-    if show_plot:
-        plt.show()
-    else:
-        print("On-screen ploting is turned off.")
-
-    del stat2d_lst
-
-    return fig
-
-
 # Plots edge-on sigma for age groups using grouping switch and unsharp mask
-def plot_sigma_by_age_grp_sw_umask(cmap,sim,blur,snap,image_dir,save_file=True):
-
-    stat2d_lst = []
-
-    # Divide snapshot into 3 age groups
-    if verbose_log:
-        print_ages(sim,"snapshot")
-    
-    # Check if min age is not equal to max age    
-    check_ages(sim)
-            
-    # Number density statistics per age group
-    age_grp = 0
-
-    # Call the grouping function 
-    groups = grouping(sim)
-
-    for grp in groups:
-        age_grp += 1
-        if verbose_log:
-            print_ages(grp,"group")
-    
-        #Extract phase space data for the model for stars in the group
-        vz_, x_, y_ = grp.star['vz'], grp.star['x'], grp.star['y']
-    
-        # Number density statistics face-on for stellar population by age group
-        vdg_stat2d,vdg_xedges,vdg_yedges,df_binnum2d = st.binned_statistic_2d(x_, y_, vz_,
-                                    statistic = 'std',
-                                    range = [[-xlim,xlim],[-ylim,ylim]],
-                                    bins = bins)
-        stat2d_lst.append(vdg_stat2d.T)
-
-    x_panels = 3
-    y_panels = 1
-
-    figsize_x = 3*x_panels      # inches
-    figsize_y = 3.5*y_panels    # inches
-
-    # Make the figure and sub plots
-    fig,axes = plt.subplots(y_panels,x_panels,figsize=(figsize_x,figsize_y))
-    
-    for i in range(x_panels):
-                
-                # Apply Unsharp Mask
-                blurred = gf(stat2d_lst[i], sigma=blur)  # Apply Gaussian blur
-                sharpened = stat2d_lst[i] + (stat2d_lst[i] - blurred)  # Unsharp masking
-
-                # Plot the sharpened image
-                image = axes[i].imshow(sharpened,
-                      origin='lower',
-                      extent=[-xlim, xlim, -ylim, ylim],
-                      cmap=cmap)
-
-                xcent = (vdg_xedges[1:] + vdg_xedges[:-1]) / 2
-                ycent = (vdg_yedges[1:] + vdg_yedges[:-1]) / 2
-                axes[i].contour(xcent, ycent, stat2d_lst[i], linewidths = 2, linestyles = 'dashed', colors = 'w')
-                axes[i].title.set_text("Age group " + str(i+1))
-                # For nuclear bars teh circle R is 0.5 and 0.75 
-                circle1 = plt.Circle((0, 0), 3, color='green', fill=False)
-                circle2 = plt.Circle((0, 0), 4, color='green', fill=False)
-                axes[i].add_patch(circle1)
-                axes[i].add_patch(circle2)
-
-    divider = make_axes_locatable(axes[i])
-    cax = divider.append_axes('right', size='5%', pad=0.05)
-    cbar = fig.colorbar(image, cax=cax, orientation='vertical')
-    #cbar.set_label(cbar_label_lst[i])
-    if i > 0:
-        axes[i].set_yticklabels([])
-
-    fig.tight_layout()
-    suptit_name = snap.replace(".gz","") + " LOS velocity dispersion " + grp_sw + " (sharp " + str(blur) + ")."
-    fig.suptitle(suptit_name)
-    plt.setp(axes[:], xlabel = 'y [kpc]')
-    plt.setp(axes[0], ylabel = 'z [kpc]')
-
-    if save_file:
-        image_name = f"{image_dir}{snap.replace('.gz', '')}_sigma_by_age_3grp_{xlim}kpc_umask_b{blur}_{grp_sw}.png"
-        plt.savefig(image_name)
-        print("Image saved to",image_name)
-    else:
-        print("Image saving is turned off.")
-
-    if show_plot:
-        plt.show()
-    else:
-        print("On-screen ploting is turned off.")
-
-    del stat2d_lst
-
-    return fig
-
-
-# Plots edge-on sigma for age groups using grouping switch and unsharp mask (NaN-safe version)
-# With fixed issued for color bar.
-def plot_sigma_by_age_grp_sw_umask2(cmap, sim, blur, snap, image_dir, save_file=True):
+# NaN-safe version
+# With fixed issues for color bar.
+def plot_sigma_by_age_grp_sw_umask2(cmap, sim, b_alpha, b_sigma, snap, image_dir, save_file=True):
     stat2d_lst = []
 
     # Divide snapshot into 3 age groups
@@ -1728,7 +1334,11 @@ def plot_sigma_by_age_grp_sw_umask2(cmap, sim, blur, snap, image_dir, save_file=
     # Call the grouping function 
     groups = grouping(sim)
 
+    # Count number of stars in each group
+    grp_stars_lst = []
+
     for grp in groups:
+        grp_stars_lst.append(len(grp.star['z']))
         #Extract phase space data for the model for stars in the group
         vz_, x_, y_ = grp.star['vz'], grp.star['x'], grp.star['y']
 
@@ -1753,8 +1363,8 @@ def plot_sigma_by_age_grp_sw_umask2(cmap, sim, blur, snap, image_dir, save_file=
     for i in range(x_panels):
         data = stat2d_lst[i]
         data_filled = np.nan_to_num(data, nan=np.nanmedian(data))  # Fill NaNs with median
-        blurred = gf(data_filled, sigma=blur)
-        sharpened = data_filled + (data_filled - blurred)  # Unsharp masking
+        # Apply Unsharp Mask
+        sharpened = apply_umask(data_filled,b_alpha,b_sigma)
 
         image = axes[i].imshow(
             sharpened,
@@ -1768,7 +1378,13 @@ def plot_sigma_by_age_grp_sw_umask2(cmap, sim, blur, snap, image_dir, save_file=
         xcent = (vdg_xedges[1:] + vdg_xedges[:-1]) / 2
         ycent = (vdg_yedges[1:] + vdg_yedges[:-1]) / 2
         axes[i].contour(xcent, ycent, data, linewidths=2, linestyles='dashed', colors='w')
-        axes[i].title.set_text("Age group " + str(i + 1))
+
+        sup_title = "Group " + str(i+1)
+        if num_stars:
+            sup_title = sup_title +  " stars " + str(grp_stars_lst[i])
+        axes[i].title.set_text(sup_title)
+
+        #axes[i].title.set_text("Group " + str(i+1))
 
         # Add reference circles
         axes[i].add_patch(plt.Circle((0, 0), 3, color='green', fill=False))
@@ -1783,13 +1399,13 @@ def plot_sigma_by_age_grp_sw_umask2(cmap, sim, blur, snap, image_dir, save_file=
     cbar_ax = fig.add_axes([0.88, 0.15, 0.02, 0.7])  # [left, bottom, width, height]
     fig.colorbar(image, cax=cbar_ax)
 
-    suptit_name = snap.replace(".gz", "") + " LOS velocity dispersion " + grp_sw + f" (sharp {blur})."
+    suptit_name = snap.replace(".gz", "") + " LOS velocity dispersion - " + grp_sw_title + f" (alpha {b_alpha} sigma {b_sigma})."
     fig.suptitle(suptit_name)
     plt.setp(axes[:], xlabel='y [kpc]')
     plt.setp(axes[0], ylabel='z [kpc]')
 
     if save_file:
-        image_name = f"{image_dir}{snap.replace('.gz', '')}_sigma_by_age_3grp_{xlim}kpc_umask_b{blur}_{grp_sw}.png"
+        image_name = f"{image_dir}{snap.replace('.gz', '')}_sigma_by_age_3grp_{xlim}kpc_ba{b_alpha}_bs{b_sigma}_{grp_sw}.png"
         plt.savefig(image_name)
         print("Image saved to", image_name)
     else:
@@ -1804,7 +1420,7 @@ def plot_sigma_by_age_grp_sw_umask2(cmap, sim, blur, snap, image_dir, save_file=
     return fig
 
 
-# Plots sigma shape estimation using amplitude and phase of Fourier moments m 4 or 6
+# Plots sigma shape estimation using amplitude and phase of Fourier moments 4 or 6
 def sigma_shape_Fm(sim,Fm,snap,image_dir,age_grp=0,save_file=True):
     
     bar_xlim = xlim + 0.5
