@@ -1,8 +1,8 @@
 # Working directories
 #model = 'run732HF'
 #model = 'run739HF'
-#model = 'TNG50' # TNG50 skinny bar from Stuart Andersson
-model = 'TNG50Ctrl' # TNG50 skinny bar from Stuart Andersson
+model = 'TNG50' # TNG50 skinny bar from Stuart Andersson
+#model = 'TNG50Ctrl' # TNG50 skinny bar from Stuart Andersson
 #model = 'run741CU' # Same age, problems with breaking into age groups
 #model = 'SB_models'
 #model = 'SB_nogas_models' # Same age, problems with breaking into age groups
@@ -22,7 +22,7 @@ manual_snap_list = False
 
 # Turn ON and OFF logging in functions
 log = True
-log = False
+#log = False
 
 # print out datasets and metadata
 verbose_log = True
@@ -125,7 +125,8 @@ else:
     bins = 30 # for 2D statistic calculations, both number density and sigma
     num_ellipses = bins/2 # half teh number of bins to match the length of ellipticity arrays from different methods
     #xlim, ylim = 5., 5. # kpc - primary bar
-    xlim, ylim = 7., 7. # kpc - primary bar plus a bit more
+    #xlim, ylim = 7., 7. # kpc - primary bar plus a bit more
+    xlim, ylim = 10., 10. # kpc - primary bar plus a bit more
 
 num_stars = True
 #num_stars = False
@@ -135,14 +136,23 @@ cmap_velo = "hot"
 
 mass_fact = 1
 
-grp_sw = "even_age" # Even age groups 0 < 1/3(max_age) < 2/3(max_age) < max_age
-grp_sw_title = "even group age"
+grp_nr = 2 # 2 (age) groups, we make the groupong dompler and we only use equal group population
 grp_sw = "equal_pop" # age groups with equal populations 1/3 of total number of stars
 grp_sw_title = "equal group population"
 
-# Sigma for Gaussian blur
-b_alpha_lst = [1,1.5,2]
-b_sigma_lst = [1.5,2,2.5]
+# This was used for other models like 7832HF and in Alexei M BSc thesis
+#grp_nr = 3 # 3 (age) groups, this was used for other models like 7832HF and in Alexei M BSc thesis
+#grp_sw = "even_age" # Even age groups 0 < 1/3(max_age) < 2/3(max_age) < max_age
+#grp_sw_title = "even group age"
+
+# Parameters for Gaussian blur
+#b_alpha_lst = [1,1.5,2]
+b_alpha_lst = [1]
+#b_sigma_lst = [1,1.5,2,2.5,3]
+b_sigma_lst = [1,2,3,4,5,6,7,8,9,10]
+b_mode = "residual"
+b_mode = "normalized"
+#b_mode = "unsharp"
 
 barFm = 2 # Fourier moment for bar
 sigmaFm = [4,6] # Fourier moment for sigma

@@ -16,7 +16,6 @@ import os
 import numpy as np
 import matplotlib.pyplot as plt
 from photutils.isophote import Ellipse, EllipseGeometry
-
 from Fourier_params import *
 
 # Reads snapshot names and param file names from the model directory
@@ -25,18 +24,22 @@ def list_snaps(model_dir):
     # list to store files
     snap_lst = []
     param_lst = []
+    units_lst = []
     
     # Iterate directory
     for path in os.listdir(model_dir):
         # check if current path is a file
         if os.path.isfile(os.path.join(model_dir, path)) and '.param' in path:
             param_lst.append(path)
-        elif os.path.isfile(os.path.join(model_dir, path)) and '.param' not in path:
+        elif os.path.isfile(os.path.join(model_dir, path)) and '.units' in path:
+            units_lst.append(path)
+        elif os.path.isfile(os.path.join(model_dir, path)) and '.param' not in path and '.units' not in path:
             snap_lst.append(path)
     
     if verbose_log:
         print(snap_lst)
         print(param_lst)
+        print(units_lst)
 
     return(sorted(snap_lst),sorted(param_lst))
 
@@ -162,7 +165,7 @@ def pbload(filename,  paramname=None, nuclear=False, align=False, log=False):
     else:
         sim = pb.load(filename, paramname=paramname)
 
-    sim.physical_units()
+    #sim.physical_units() - for TNG50, which already has the correct physical units
 
     if log:
         print('* Rotating the snapshot face on...')
@@ -180,6 +183,15 @@ def pbload(filename,  paramname=None, nuclear=False, align=False, log=False):
     # Aligning the data
     if align:
         bar_align(sim, nuclear, log)
+
+    if log:
+        print("Model properties:", sim.properties)
+        print("Star, gas and DM particles:", len(sim.star), len(sim.gas), len(sim.dark))
+        print("Model properties in Gyr time units:", sim.properties['time'].in_units('Gyr'))
+        #print("Model physical units:", sim.physical_units())
+        print("Model quantities:", sim.keys())
+        print("Model loadable quantities:", sim.loadable_keys())
+        print_velos(sim,"snapshot")
 
     return sim
 
@@ -238,15 +250,15 @@ def sum_columns_and_rows(matrix):
     return row_sums, col_sums
 
 
-# Divide star population in 3 groups 
-def grouping(sim):
+# Divide star population in groups 
+def grouping(sim,grp_nr):
     if grp_sw == "even_age": # with fixed age dividers 0 < 1/3 < 2/3 < 1
         min_age = np.min(sim.star['age'])
         max_age = np.max(sim.star['age'])
         edges = np.linspace(min_age, max_age, 4)  # Divides into 3 equal age bins
         groups = []
-        for i in range(3):
-            if i < 2:
+        for i in range(grp_nr):
+            if i < grp_nr - 1:
                 mask = (sim.star['age'] >= edges[i]) & (sim.star['age'] < edges[i+1])
             else:
                 mask = (sim.star['age'] >= edges[i]) & (sim.star['age'] <= edges[i+1])  # include max in last bin
@@ -259,13 +271,19 @@ def grouping(sim):
 
         # Split into three equal groups
         total_stars = len(sorted_stars)
-        group_size = total_stars // 3
+        group_size = total_stars // grp_nr
 
-        groups = [
-            sorted_stars[0:group_size],                            # Youngest third
-            sorted_stars[group_size:2*group_size],                 # Intermediate third
-            sorted_stars[2*group_size:],                           # Oldest third (may be slightly larger if not divisible by 3)
-        ]
+        if grp_nr == 3:
+            groups = [
+                sorted_stars[0:group_size],                            # Youngest third
+                sorted_stars[group_size:2*group_size],                 # Intermediate third
+                sorted_stars[2*group_size:],                           # Oldest third (may be slightly larger if not divisible by 3)
+            ]
+        elif grp_nr == 2:
+            groups = [
+                sorted_stars[0:group_size],                            # Youngest half population
+                sorted_stars[group_size:],                              # Oldest lalf population (may be slightly larger if not divisible by 3)
+            ]
 
     return groups
 
@@ -279,6 +297,23 @@ def print_ages(sim,entity):
     print('**** Max stellar age - ' + str(max_age) + ' Gyr.')
 
 
+# Pring stellar velocities for snmapshot
+def print_velos(sim,entity):
+    min_vx = round(min(sim.star['vx']),2)
+    max_vx = round(max(sim.star['vx']),2)
+    min_vy = round(min(sim.star['vy']),2)
+    max_vy = round(max(sim.star['vy']),2)
+    min_vz = round(min(sim.star['vz']),2)
+    max_vz = round(max(sim.star['vz']),2)
+    print(f'** Stars in {entity} - ', len(sim.star))
+    print('**** Min stellar Vx component - ' + str(min_vx) + ' km/s.')
+    print('**** Max stellar Vx component - ' + str(max_vx) + ' km/s.')
+    print('**** Min stellar Vy component - ' + str(min_vy) + ' km/s.')
+    print('**** Max stellar Vy component - ' + str(max_vy) + ' km/s.')
+    print('**** Min stellar Vz component - ' + str(min_vz) + ' km/s.')
+    print('**** Max stellar Vz component - ' + str(max_vz) + ' km/s.')
+
+
 # Check if snapshot min and max ages are different
 def check_ages(sim):
     min_age = round(min(sim.star['age']),2)
@@ -290,10 +325,23 @@ def check_ages(sim):
 
 
 # Apply unsharp mask to 2D stats
-def apply_umask(stats,b_alpha,b_sigma):
+def apply_umask_old(stats,b_alpha,b_sigma):
     blurred = gf(stats, b_sigma)  # Apply Gaussian blur
     sharpened = stats + b_alpha * (stats - blurred)  # Unsharp masking
     return sharpened
+
+
+# Bring up residual or normalized unsharp mask for 2D stats
+def apply_umask(stats, sigma, mode, alpha=1.0):
+    blurred = gf(stats, sigma)
+    if mode == 'residual':
+        return stats - blurred
+    elif mode == 'normalized':
+        return (stats - blurred) / (blurred + 1e-6)
+    elif mode == 'unsharp':
+        return stats + alpha * (stats - blurred)
+    else:
+        raise ValueError("Invalid mode. Choose 'residual', 'normalized', or 'unsharp'.")
 
 
 # Plots face-on number dencity
@@ -354,6 +402,15 @@ def plot_density(cmap,sim,snap,image_dir,save_file=True):
     axes.set_xlabel('x [kpc]')
     axes.set_ylabel('y [kpc]')
 
+    # Adding spatial reference circles
+    # For nuclear bars the circle R is 0.5 0.75 1 kpc
+    circle1 = plt.Circle((0, 0), 3, color='green', fill=False)
+    circle2 = plt.Circle((0, 0), 5, color='green', fill=False)
+    circle3 = plt.Circle((0, 0), 7, color='green', fill=False)
+    axes.add_patch(circle1)
+    axes.add_patch(circle2)
+    axes.add_patch(circle3)
+
     divider = make_axes_locatable(axes)
     cax = divider.append_axes('right', size='5%', pad=0.05)
     cbar = plt.colorbar(image, cax=cax, orientation='vertical')
@@ -389,7 +446,7 @@ def plot_density_by_age_grp_sw(cmap,sim,pos,snap,image_dir,e_list=False,save_fil
     age_grp = 0
 
     # Call the grouping function 
-    groups = grouping(sim)
+    groups = grouping(sim,grp_nr)
 
     # Count number of stars in each group
     grp_stars_lst = []
@@ -413,7 +470,7 @@ def plot_density_by_age_grp_sw(cmap,sim,pos,snap,image_dir,e_list=False,save_fil
         stat2d_lst.append(dfg_stat2d.T)
 
     # Setup for plotting
-    x_panels, y_panels = 3, 1
+    x_panels, y_panels = grp_nr, 1
     figsize_x, figsize_y = 3 * x_panels, 3.5 * y_panels
     fig, axes = plt.subplots(y_panels, x_panels, figsize=(figsize_x, figsize_y))
     
@@ -435,10 +492,15 @@ def plot_density_by_age_grp_sw(cmap,sim,pos,snap,image_dir,e_list=False,save_fil
                 #else:
                     #axes[i].title.set_text("Group " + str(i+1) + str(grp_stars_lst[i]) + " stars")
                 axes[i].title.set_text(sup_title)
-                circle1 = plt.Circle((0, 0), 0.5, color='green', fill=False)
-                circle2 = plt.Circle((0, 0), 0.75, color='green', fill=False)
+                
+                # Adding spatial reference circles
+                # For nuclear bars the circle R is 0.5 0.75 1 kpc
+                circle1 = plt.Circle((0, 0), 3, color='green', fill=False)
+                circle2 = plt.Circle((0, 0), 5, color='green', fill=False)
+                circle3 = plt.Circle((0, 0), 7, color='green', fill=False)
                 axes[i].add_patch(circle1)
                 axes[i].add_patch(circle2)
+                axes[i].add_patch(circle3)
 
     # Add a shared colorbar after plotting all subplots
     fig.tight_layout()
@@ -455,7 +517,7 @@ def plot_density_by_age_grp_sw(cmap,sim,pos,snap,image_dir,e_list=False,save_fil
     plt.setp(axes[0], ylabel = 'y [kpc]')
 
     if save_file:
-        image_name = image_dir + snap.replace(".gz","") + pos + '_dens_by_age_3grp_' + str(xlim) + 'kpc_' + grp_sw + '.png'
+        image_name = image_dir + snap.replace(".gz","") + pos + '_dens_by_age_' + str(grp_nr) + 'grp_' + str(xlim) + 'kpc_' + grp_sw + '.png'
         plt.savefig(image_name)
         print("Image saved to",image_name)
     else:
@@ -594,6 +656,7 @@ def fit_ellipses_to_density_old(stat2d, bins, num_ellipses):
     return r_list, e_list, round(e,2)
 
 
+# This function calculates a bar ellipticity using ellipse fit method
 def fit_ellipses_to_density(stat2d, bins, num_ellipses,
                             xlim=None,                 # pass if you want smas in kpc
                             verbose_log=False,
@@ -706,7 +769,7 @@ def fit_ellipses_to_density(stat2d, bins, num_ellipses,
 # Plots bar ellipticity using grouping switch
 def bar_ellipticity_by_age_grp_sw(sim,snap,image_dir,save_file=True):
 
-    x_panels = 3
+    x_panels = grp_nr
     y_panels = 1
     figsize_x = 4*x_panels    # inches
     figsize_y = 4*y_panels    # inches
@@ -734,7 +797,7 @@ def bar_ellipticity_by_age_grp_sw(sim,snap,image_dir,save_file=True):
     e_age_grp = []
 
     # Call the grouping function 
-    groups = grouping(sim)
+    groups = grouping(sim,grp_nr)
 
     for grp in groups:
         age_grp += 1
@@ -825,7 +888,7 @@ def bar_ellipticity_by_age_grp_sw(sim,snap,image_dir,save_file=True):
     plt.setp(axes[0], ylabel = 'e')
 
     if save_file:
-        image_name = image_dir + snap.replace(".gz","") + '_ellipticity_by_age_3grp_' + str(xlim) + 'kpc_' + grp_sw + '.png'
+        image_name = image_dir + snap.replace(".gz","") + '_ellipticity_by_age_' + str(grp_nr) + 'grp_'+ str(xlim) + 'kpc_' + grp_sw + '.png'
         plt.savefig(image_name)
         print("Image saved to",image_name)
     else:
@@ -1080,7 +1143,7 @@ def bar_length_by_age_grp_sw_Fm(sim,Fm,snap,image_dir,save_file=True):
     age_grp = 0
 
     # Call the grouping function 
-    groups = grouping(sim)
+    groups = grouping(sim,grp_nr)
 
     for grp in groups:
         age_grp += 1
@@ -1095,10 +1158,10 @@ def bar_length_by_age_grp_sw_Fm(sim,Fm,snap,image_dir,save_file=True):
 # Plots edge-on sigma
 def plot_sigma(cmap,sim,xlim,ylim,bins,snap,image_dir,save_file=True,show_plot=True,verbose_log=False):
 
-    #Extract phase space data for the model
+    #Extract phase space and velocity data for the model
     vz_, x_, y_ = sim.star['vz'], sim.star['x'], sim.star['y']
     
-    # Number density statistics face-on for stellar population by age group
+    # Velocity dispersion statistics edge-on with bar being end-on
     vd_stat2d,vd_xedges,vd_yedges,df_binnum2d = st.binned_statistic_2d(x_, y_, vz_,
                                     statistic = 'std',
                                     range = [[-xlim,xlim],[-ylim,ylim]],
@@ -1113,25 +1176,36 @@ def plot_sigma(cmap,sim,xlim,ylim,bins,snap,image_dir,save_file=True,show_plot=T
     # Make the figure and sub plots
     fig,axes = plt.subplots(y_panels,x_panels,figsize=(figsize_x,figsize_y))
     
-    image = plt.imshow(vd_stat2d, 
+    plot_data = vd_stat2d  # transpose to get [y, x]
+
+    image = plt.imshow(plot_data, 
                 origin = 'lower',
                 extent = [-xlim, xlim, -ylim, ylim ],
                 cmap = cmap)
     xcent = (vd_xedges[1:] + vd_xedges[:-1]) / 2
     ycent = (vd_yedges[1:] + vd_yedges[:-1]) / 2
-    plt.contour(xcent, ycent, vd_stat2d, linewidths = 2, linestyles = 'dashed', colors = 'w')
-    circle1 = plt.Circle((0, 0), 3, color='green', fill=False)
-    circle2 = plt.Circle((0, 0), 4, color='green', fill=False)
+    plt.contour(xcent, ycent, plot_data, linewidths = 2, linestyles = 'dashed', colors = 'w')
+    
     axes = plt.gca()
-    axes.add_patch(circle1)
-    axes.add_patch(circle2)
-
     divider = make_axes_locatable(axes)
     cax = divider.append_axes('right', size='5%', pad=0.05)
     cbar = plt.colorbar(image, cax=cax, orientation='vertical')
 
+    # Adding spatial reference circles
+    # For nuclear bars the circle R is 0.5 0.75 1 kpc
+    circle1 = plt.Circle((0, 0), 3, color='green', fill=False)
+    circle2 = plt.Circle((0, 0), 5, color='green', fill=False)
+    circle3 = plt.Circle((0, 0), 7, color='green', fill=False)
+    axes.add_patch(circle1)
+    axes.add_patch(circle2)
+    axes.add_patch(circle3)
+
     fig.tight_layout()
-    fig.suptitle(snap.replace(".gz","") + " LOS velocity dispersion.")
+    
+    # Place main title
+    main_title = f"{snap.replace('.gz', '')} LOS velocity dispersion"
+    fig.suptitle(main_title, fontsize=14, y=0.96)
+
     axes.set_xlabel('y [kpc]')
     axes.set_ylabel('z [kpc]')
 
@@ -1154,10 +1228,10 @@ def plot_sigma(cmap,sim,xlim,ylim,bins,snap,image_dir,save_file=True,show_plot=T
 # Plots edge-on sigma using the unsharp mask
 def plot_sigma_umask(cmap,sim,xlim,ylim,bins,b_alpha,b_sigma,snap,image_dir,save_file=True,show_plot=True,verbose_log=False):
 
-    # Extract phase space data for the model
+    #Extract phase space and velocity data for the model
     vz_, x_, y_ = sim.star['vz'], sim.star['x'], sim.star['y']
-
-    # Number density statistics face-on for stellar population by age group
+    
+    # Velocity dispersion statistics edge-on with bar being end-on
     vd_stat2d, vd_xedges, vd_yedges, df_binnum2d = st.binned_statistic_2d(
         x_, y_, vz_,
         statistic='std',
@@ -1166,7 +1240,7 @@ def plot_sigma_umask(cmap,sim,xlim,ylim,bins,b_alpha,b_sigma,snap,image_dir,save
     )
 
     # Apply Unsharp Mask
-    sharpened = apply_umask(vd_stat2d,b_alpha,b_sigma)
+    sharpened = apply_umask(vd_stat2d,b_sigma,b_mode,b_alpha)
 
     x_panels = 1
     y_panels = 1
@@ -1177,8 +1251,10 @@ def plot_sigma_umask(cmap,sim,xlim,ylim,bins,b_alpha,b_sigma,snap,image_dir,save
     # Make the figure and sub plots
     fig, axes = plt.subplots(y_panels, x_panels, figsize=(figsize_x, figsize_y))
 
+    plot_data = sharpened  # transpose to get [y, x]
+
     # Plot the sharpened image
-    img = axes.imshow(sharpened,
+    img = axes.imshow(plot_data,
                       origin='lower',
                       extent=[-xlim, xlim, -ylim, ylim],
                       cmap=cmap)
@@ -1186,13 +1262,16 @@ def plot_sigma_umask(cmap,sim,xlim,ylim,bins,b_alpha,b_sigma,snap,image_dir,save
     # Contours
     xcent = (vd_xedges[1:] + vd_xedges[:-1]) / 2
     ycent = (vd_yedges[1:] + vd_yedges[:-1]) / 2
-    axes.contour(xcent, ycent, sharpened, linewidths=2, linestyles='dashed', colors='w')
+    axes.contour(xcent, ycent, plot_data, linewidths=2, linestyles='dashed', colors='w')
 
-    # Adding circles
+    # Adding spatial reference circles
+    # For nuclear bars the circle R is 0.5 0.75 1 kpc
     circle1 = plt.Circle((0, 0), 3, color='green', fill=False)
-    circle2 = plt.Circle((0, 0), 4, color='green', fill=False)
+    circle2 = plt.Circle((0, 0), 5, color='green', fill=False)
+    circle3 = plt.Circle((0, 0), 7, color='green', fill=False)
     axes.add_patch(circle1)
     axes.add_patch(circle2)
+    axes.add_patch(circle3)
 
     # Colorbar
     divider = make_axes_locatable(axes)
@@ -1200,14 +1279,26 @@ def plot_sigma_umask(cmap,sim,xlim,ylim,bins,b_alpha,b_sigma,snap,image_dir,save
     cbar = plt.colorbar(img, cax=cax, orientation='vertical')
 
     fig.tight_layout()
-    suptit_name = snap.replace(".gz", "") + " LOS velocity dispersion " + f" (alpha {b_alpha} sigma {b_sigma})."
-    fig.suptitle(suptit_name)
+    
+    # Title: main title on first line
+    main_title = f"{snap.replace('.gz', '')} LOS velocity dispersion"
+
+    # Subtitle: mode and sigma on second line, smaller font
+    subtitle = f"(Unsharp mask - mode: {b_mode}, sigma: {b_sigma})"
+
+    # Place main title
+    fig.suptitle(main_title, fontsize=14, y=0.96)
+
+    # Place subtitle just below the main title
+    fig.text(0.5, 0.9, subtitle, ha='center', fontsize=10)
+
     axes.set_xlabel('y [kpc]')
     axes.set_ylabel('z [kpc]')
 
     # Save or show the plot
     if save_file:
-        image_name = f"{image_dir}{snap.replace('.gz', '')}_sigma_{xlim}kpc_ba{b_alpha}_bs{b_sigma}.png"
+        #image_name = f"{image_dir}{snap.replace('.gz', '')}_sigma_{xlim}kpc_ba{b_alpha}_bs{b_sigma}.png"
+        image_name = f"{image_dir}{snap.replace('.gz', '')}_sigma_{xlim}kpc_bmode{b_mode}_bs{b_sigma}.png"
         plt.savefig(image_name)
         print("Image saved to", image_name)
     else:
@@ -1239,7 +1330,7 @@ def plot_sigma_by_age_grp_sw(cmap,sim,snap,image_dir,save_file=True):
     age_grp = 0
 
     # Call the grouping function 
-    groups = grouping(sim)
+    groups = grouping(sim,grp_nr)
 
     for grp in groups:
         age_grp += 1
@@ -1257,7 +1348,7 @@ def plot_sigma_by_age_grp_sw(cmap,sim,snap,image_dir,save_file=True):
         stat2d_lst.append(vdg_stat2d.T)
 
     # Setup for plotting
-    x_panels, y_panels = 3, 1
+    x_panels, y_panels = grp_nr, 1
     figsize_x, figsize_y = 3 * x_panels, 3.5 * y_panels
     fig, axes = plt.subplots(y_panels, x_panels, figsize=(figsize_x, figsize_y))
     
@@ -1266,7 +1357,8 @@ def plot_sigma_by_age_grp_sw(cmap,sim,snap,image_dir,save_file=True):
     vmax = max(np.nanmax(d) for d in stat2d_lst)
 
     for i in range(x_panels):
-            image = axes[i].imshow(stat2d_lst[i], 
+            plot_data = stat2d_lst[i]
+            image = axes[i].imshow(plot_data, 
             origin = 'lower',
             extent = [-xlim, xlim, -ylim, ylim ],
             cmap=cmap,
@@ -1275,13 +1367,17 @@ def plot_sigma_by_age_grp_sw(cmap,sim,snap,image_dir,save_file=True):
             )
             xcent = (vdg_xedges[1:] + vdg_xedges[:-1]) / 2
             ycent = (vdg_yedges[1:] + vdg_yedges[:-1]) / 2
-            axes[i].contour(xcent, ycent, stat2d_lst[i], linewidths = 2, linestyles = 'dashed', colors = 'w')
+            axes[i].contour(xcent, ycent, plot_data, linewidths = 2, linestyles = 'dashed', colors = 'w')
             axes[i].title.set_text("Age group " + str(i+1))
-            # For nuclear bars teh circle R is 0.5 and 0.75 
+            
+            # Adding spatial reference circles
+            # For nuclear bars the circle R is 0.5 0.75 1 kpc
             circle1 = plt.Circle((0, 0), 3, color='green', fill=False)
-            circle2 = plt.Circle((0, 0), 4, color='green', fill=False)
+            circle2 = plt.Circle((0, 0), 5, color='green', fill=False)
+            circle3 = plt.Circle((0, 0), 7, color='green', fill=False)
             axes[i].add_patch(circle1)
             axes[i].add_patch(circle2)
+            axes[i].add_patch(circle3)
 
     #divider = make_axes_locatable(axes[i])
     #cax = divider.append_axes('right', size='5%', pad=0.05)
@@ -1297,13 +1393,17 @@ def plot_sigma_by_age_grp_sw(cmap,sim,snap,image_dir,save_file=True):
     if i > 0:
         axes[i].set_yticklabels([])
 
-    suptit_name = snap.replace(".gz","") + " LOS velocity dispersion - " + grp_sw_title 
+    #suptit_name = snap.replace(".gz","") + " LOS velocity dispersion - " + grp_sw_title 
+    #suptit_name = snap.replace(".gz", "") + " LOS velocity dispersion"
+    suptit_name = f"{snap.replace('.gz', '')} LOS velocity dispersion"
+
     fig.suptitle(suptit_name)
     plt.setp(axes[:], xlabel = 'y [kpc]')
     plt.setp(axes[0], ylabel = 'z [kpc]')
 
     if save_file:
-        image_name = image_dir + snap.replace(".gz","") + '_sigma_by_age_3grp_' + str(xlim) + 'kpc_' + grp_sw + '.png'
+        #image_name = image_dir + snap.replace(".gz","") + '_sigma_by_age_' + str(grp_nr) + 'grp_' + str(xlim) + 'kpc_' + grp_sw + '.png'
+        image_name = f"{image_dir}{snap.replace('.gz', '')}_sigma_by_age_{grp_nr}grp_{xlim}kpc_{grp_sw}.png"
         plt.savefig(image_name)
         print("Image saved to",image_name)
     else:
@@ -1332,7 +1432,7 @@ def plot_sigma_by_age_grp_sw_umask2(cmap, sim, b_alpha, b_sigma, snap, image_dir
     check_ages(sim)
 
     # Call the grouping function 
-    groups = grouping(sim)
+    groups = grouping(sim,grp_nr)
 
     # Count number of stars in each group
     grp_stars_lst = []
@@ -1352,7 +1452,7 @@ def plot_sigma_by_age_grp_sw_umask2(cmap, sim, b_alpha, b_sigma, snap, image_dir
         stat2d_lst.append(vdg_stat2d.T)
 
     # Setup for plotting
-    x_panels, y_panels = 3, 1
+    x_panels, y_panels = grp_nr, 1
     figsize_x, figsize_y = 3 * x_panels, 3.5 * y_panels
     fig, axes = plt.subplots(y_panels, x_panels, figsize=(figsize_x, figsize_y))
 
@@ -1364,10 +1464,11 @@ def plot_sigma_by_age_grp_sw_umask2(cmap, sim, b_alpha, b_sigma, snap, image_dir
         data = stat2d_lst[i]
         data_filled = np.nan_to_num(data, nan=np.nanmedian(data))  # Fill NaNs with median
         # Apply Unsharp Mask
-        sharpened = apply_umask(data_filled,b_alpha,b_sigma)
+        sharpened = apply_umask(data_filled,b_sigma,b_mode,b_alpha)
 
+        plot_data = sharpened
         image = axes[i].imshow(
-            sharpened,
+            plot_data,
             origin='lower',
             extent=[-xlim, xlim, -ylim, ylim],
             cmap=cmap,
@@ -1377,7 +1478,7 @@ def plot_sigma_by_age_grp_sw_umask2(cmap, sim, b_alpha, b_sigma, snap, image_dir
 
         xcent = (vdg_xedges[1:] + vdg_xedges[:-1]) / 2
         ycent = (vdg_yedges[1:] + vdg_yedges[:-1]) / 2
-        axes[i].contour(xcent, ycent, data, linewidths=2, linestyles='dashed', colors='w')
+        axes[i].contour(xcent, ycent, plot_data, linewidths=2, linestyles='dashed', colors='w')
 
         sup_title = "Group " + str(i+1)
         if num_stars:
@@ -1386,9 +1487,14 @@ def plot_sigma_by_age_grp_sw_umask2(cmap, sim, b_alpha, b_sigma, snap, image_dir
 
         #axes[i].title.set_text("Group " + str(i+1))
 
-        # Add reference circles at 3 and 4 kpc
-        axes[i].add_patch(plt.Circle((0, 0), 3, color='green', fill=False))
-        axes[i].add_patch(plt.Circle((0, 0), 4, color='green', fill=False))
+        # Adding spatial reference circles
+        # For nuclear bars the circle R is 0.5 0.75 1 kpc
+        circle1 = plt.Circle((0, 0), 3, color='green', fill=False)
+        circle2 = plt.Circle((0, 0), 5, color='green', fill=False)
+        circle3 = plt.Circle((0, 0), 7, color='green', fill=False)
+        axes[i].add_patch(circle1)
+        axes[i].add_patch(circle2)
+        axes[i].add_patch(circle3)
 
         if i > 0:
             axes[i].set_yticklabels([])
@@ -1399,13 +1505,15 @@ def plot_sigma_by_age_grp_sw_umask2(cmap, sim, b_alpha, b_sigma, snap, image_dir
     cbar_ax = fig.add_axes([0.88, 0.15, 0.02, 0.7])  # [left, bottom, width, height]
     fig.colorbar(image, cax=cbar_ax)
 
-    suptit_name = snap.replace(".gz", "") + " LOS velocity dispersion - " + grp_sw_title + f" (alpha {b_alpha} sigma {b_sigma})."
+    #suptit_name = snap.replace(".gz", "") + " LOS velocity dispersion - " + grp_sw_title + f" (mode {b_mode} sigma {b_sigma})."
+    #suptit_name = snap.replace(".gz", "") + " LOS velocity dispersion - " + "unsharp mask " f" (mode {b_mode} sigma {b_sigma})."
+    suptit_name = f"{snap.replace('.gz', '')} LOS velocity dispersion - unsharp mask (mode {b_mode} sigma {b_sigma})."
     fig.suptitle(suptit_name)
     plt.setp(axes[:], xlabel='y [kpc]')
     plt.setp(axes[0], ylabel='z [kpc]')
 
     if save_file:
-        image_name = f"{image_dir}{snap.replace('.gz', '')}_sigma_by_age_3grp_{xlim}kpc_ba{b_alpha}_bs{b_sigma}_{grp_sw}.png"
+        image_name = f"{image_dir}{snap.replace('.gz', '')}_sigma_by_age_{grp_nr}grp_{xlim}kpc_bmode{b_mode}_bs{b_sigma}_{grp_sw}.png"
         plt.savefig(image_name)
         print("Image saved to", image_name)
     else:
@@ -1668,7 +1776,7 @@ def sigma_shape_by_age_grp_sw_Fm(sim,Fm,snap,image_dir,save_file=True):
     age_grp = 0
 
     # Call the grouping function 
-    groups = grouping(sim)
+    groups = grouping(sim,grp_nr)
 
     for grp in groups:
         age_grp += 1
@@ -1705,7 +1813,7 @@ def sigma_shape_by_age_grp_sw_combined_Fm(sim,sigmaFm,snap,image_dir,age_grp=0,s
     age_grp = 0
 
     # Call the grouping function 
-    groups = grouping(sim)
+    groups = grouping(sim,grp_nr)
 
     for grp in groups:
         age_grp += 1
@@ -1913,7 +2021,7 @@ def sigma_shape_by_age_grp_sw_combined_Fm(sim,sigmaFm,snap,image_dir,age_grp=0,s
     ylab = r'$A(R)_Fm=4 $'
     y2lab = r'$A(R)_Fm=6 $'
 
-    x_panels = 3
+    x_panels = grp_nr
     y_panels = 1
 
     figsize_x = 3*x_panels      # inches
@@ -1977,7 +2085,7 @@ def sigma_shape_by_age_grp_sw_combined_Fm(sim,sigmaFm,snap,image_dir,age_grp=0,s
     #plt.setp(axes[0], ylabel = 'y [kpc]')
 
     if save_file:
-        image_name = image_dir + snap.replace(".gz","") + '_sigma_amp_comb_by_age_3grp_' + str(xlim) + 'kpc_' + grp_sw + '.png'
+        image_name = image_dir + snap.replace(".gz","") + '_sigma_amp_comb_by_age_' + str(xlim) + 'kpc_' + grp_sw + '.png'
         plt.savefig(image_name)
         print("Image saved to",image_name)
     else:
@@ -2457,10 +2565,7 @@ def plot_density_hist2d(x,y): # Learned from Stuart Andersson
     return None
 
 
-# Create PDF - needs to be fixed
-import matplotlib.pyplot as plt
-from matplotlib.backends.backend_pdf import PdfPages
-
+# Save important plots as PDF on a single A4 page
 def save_to_pdf(output_pdf, square_figures, long_figures):
     with PdfPages(output_pdf) as pdf:
         # Create a master A4 figure
