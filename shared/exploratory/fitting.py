@@ -1,6 +1,6 @@
 from photutils.isophote import Ellipse, EllipseGeometry
-import Fourier_functions as mf
-from Fourier_params import *
+import code.shared.Fourier_functions_v1_0_0 as mf
+from code.shared.Fourier_params_v1_0_0 import *
 import matplotlib.pyplot as plt
 from matplotlib.colors import LogNorm
 from matplotlib.patches import Circle

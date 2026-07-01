@@ -1,3 +1,7 @@
+__version__ = "1.0.0"
+# Changelog
+# 1.0.0 - Baseline before the code review.
+
 # import modules
 from scipy import stats as st
 import pynbody as pb
@@ -16,7 +20,7 @@ import os
 import numpy as np
 import matplotlib.pyplot as plt
 from photutils.isophote import Ellipse, EllipseGeometry
-from Fourier_params import *
+from Fourier_params_v1_0_0 import *
 
 # Reads snapshot names and param file names from the model directory
 def list_snaps(model_dir):

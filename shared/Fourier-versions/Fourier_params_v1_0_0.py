@@ -1,3 +1,7 @@
+__version__ = "1.0.0"
+# Changelog
+# 1.0.0 - Baseline before the code review.
+
 # Working directories
 #model = 'run732HF'
 #model = 'run739HF'
